@@ -411,6 +411,69 @@ test.describe('zoom to my location', () => {
   });
 });
 
+test('retries at high accuracy when the coarse attempt reports no position', async ({ page }) => {
+  // Reproduces the desktop case: the browser's network location service answers
+  // POSITION_UNAVAILABLE, but a GPS fix is available when asked for precisely.
+  await page.addInitScript(() => {
+    const calls: boolean[] = [];
+    (window as unknown as { __locateCalls: boolean[] }).__locateCalls = calls;
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: {
+        getCurrentPosition: (
+          ok: (position: unknown) => void,
+          fail: (error: unknown) => void,
+          options?: { enableHighAccuracy?: boolean },
+        ) => {
+          const precise = options?.enableHighAccuracy === true;
+          calls.push(precise);
+          if (!precise) {
+            fail({ code: 2, message: 'Position update is unavailable' });
+            return;
+          }
+          ok({ coords: { latitude: 48.8566, longitude: 2.3522, accuracy: 20 }, timestamp: Date.now() });
+        },
+        watchPosition: () => 0,
+        clearWatch: () => {},
+      },
+    });
+  });
+  await page.goto('/');
+  await importFixtures(page);
+
+  await page.getByRole('button', { name: 'Zoom to my location' }).click();
+
+  await expect(page.locator('.location-dot')).toBeVisible();
+  await expect(page.locator('.leaflet-control-scale-line').first()).toHaveText(/\bm$/);
+  // Coarse first, then precise: never the other way round.
+  expect(await page.evaluate(() => (window as unknown as { __locateCalls: boolean[] }).__locateCalls))
+    .toEqual([false, true]);
+  // The user is never shown an error for an attempt that ultimately succeeded.
+  await expect(page.getByText(/Could not get your location/)).toHaveCount(0);
+});
+
+test('explains a device that cannot locate itself at all', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: {
+        getCurrentPosition: (_ok: unknown, fail: (error: unknown) => void) =>
+          fail({ code: 2, message: 'Position update is unavailable' }),
+        watchPosition: () => 0,
+        clearWatch: () => {},
+      },
+    });
+  });
+  await page.goto('/');
+  await importFixtures(page);
+
+  await page.getByRole('button', { name: 'Zoom to my location' }).click();
+  // The advice has to be actionable, not the browser's own opaque wording.
+  await expect(page.getByText(/could not work out where it is/)).toBeVisible();
+  await expect(page.getByText(/pan the map to your fields instead/)).toBeVisible();
+  await expect(page.locator('.location-dot')).toHaveCount(0);
+});
+
 test('reports a refused location rather than failing silently', async ({ page }) => {
   // The refusal is stubbed rather than driven through Chromium's permission prompt,
   // which under automation neither grants nor rejects promptly.
@@ -429,7 +492,7 @@ test('reports a refused location rather than failing silently', async ({ page })
   await importFixtures(page);
 
   await page.getByRole('button', { name: 'Zoom to my location' }).click();
-  await expect(page.getByText(/Could not get your location/)).toBeVisible();
+  await expect(page.getByText(/the browser blocked it/)).toBeVisible();
   await expect(page.locator('.location-dot')).toHaveCount(0);
 });
 

@@ -54,6 +54,25 @@ function locateControl(onClick: () => void): L.Control {
   return control;
 }
 
+/**
+ * Turns a geolocation failure into something worth reading. The browser's own message
+ * ("position update is unavailable") tells a user nothing about what to do next.
+ */
+function describeLocationError(event: L.ErrorEvent): string {
+  const detail = event.message ? ` (${event.message.replace(/^Geolocation error:\s*/i, '').replace(/\.$/, '')})` : '';
+  switch (event.code) {
+    case 1:
+      return 'Could not get your location: the browser blocked it. Allow location access ' +
+        'for this site in the address bar, then try again.';
+    case 3:
+      return 'Could not get your location: the request timed out before a position came back.';
+    default:
+      return 'Could not get your location: your device could not work out where it is' +
+        `${detail}. A desktop without GPS relies on the browser's own location service, ` +
+        'which is often unavailable — pan the map to your fields instead.';
+  }
+}
+
 export interface MapViewProps {
   workspace: Workspace;
   selection: ReadonlySet<FeatureId>;
@@ -89,6 +108,8 @@ export default function MapView(props: MapViewProps) {
   const didFitRef = useRef(false);
   /** The "you are here" dot and its accuracy ring, replaced on each locate. */
   const locationLayerRef = useRef<L.LayerGroup | null>(null);
+  /** Which locate attempt is in flight, so the coarse one can be retried precisely. */
+  const locateAttemptRef = useRef<'idle' | 'coarse' | 'precise'>('idle');
 
   // Handlers are read through a ref so Leaflet callbacks never close over stale props.
   const propsRef = useRef(props);
@@ -117,14 +138,47 @@ export default function MapView(props: MapViewProps) {
 
     L.control.scale({ metric: true, imperial: false, position: 'bottomleft' }).addTo(map);
 
-    locateControl(() => {
+    /**
+     * Asks for a position. Leaflet wraps navigator.geolocation; nothing is sent anywhere
+     * by the app and the position never leaves this tab.
+     *
+     * The first attempt is deliberately coarse. Asking for high accuracy makes a desktop
+     * browser go looking for GPS hardware that is not there, and several of them answer
+     * POSITION_UNAVAILABLE outright rather than falling back to network positioning —
+     * which is far more precision than "show me roughly where I am" needs anyway. If the
+     * coarse attempt fails, the precise one is worth a try: on a phone with no network
+     * location, GPS is exactly what does work.
+     */
+    const startLocate = (precise: boolean) => {
+      locateAttemptRef.current = precise ? 'precise' : 'coarse';
       map.getContainer().classList.add('locating');
-      // Leaflet's own wrapper around navigator.geolocation: nothing is sent anywhere by
-      // the app, and the position never leaves this tab.
-      map.locate({ setView: true, maxZoom: 16, enableHighAccuracy: true, timeout: 15_000 });
+      map.locate({
+        setView: true,
+        maxZoom: 16,
+        enableHighAccuracy: precise,
+        timeout: precise ? 20_000 : 8_000,
+        maximumAge: precise ? 0 : 60_000,
+      });
+    };
+
+    locateControl(() => {
+      if (!('geolocation' in navigator)) {
+        propsRef.current.onLocationError(
+          'Could not get your location: this browser does not support geolocation.',
+        );
+        return;
+      }
+      if (!window.isSecureContext) {
+        propsRef.current.onLocationError(
+          'Could not get your location: browsers only allow it over https:// or on localhost.',
+        );
+        return;
+      }
+      startLocate(false);
     }).addTo(map);
 
     map.on('locationfound', (event: L.LocationEvent) => {
+      locateAttemptRef.current = 'idle';
       map.getContainer().classList.remove('locating');
       locationLayerRef.current?.remove();
       locationLayerRef.current = L.layerGroup([
@@ -150,8 +204,15 @@ export default function MapView(props: MapViewProps) {
     });
 
     map.on('locationerror', (event: L.ErrorEvent) => {
+      // A dead network location provider and a missing GPS fail the same way, so the
+      // coarse attempt gets one retry at high accuracy before giving up.
+      if (locateAttemptRef.current === 'coarse' && event.code !== 1) {
+        startLocate(true);
+        return;
+      }
+      locateAttemptRef.current = 'idle';
       map.getContainer().classList.remove('locating');
-      propsRef.current.onLocationError(event.message);
+      propsRef.current.onLocationError(describeLocationError(event));
     });
 
     map.pm.setGlobalOptions({ snappable: true, snapDistance: SNAP_DISTANCE });

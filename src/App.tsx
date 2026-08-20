@@ -675,9 +675,7 @@ export default function App() {
               onCutHole={handleCutHole}
               onSplitLine={handleSplitLine}
               onGeometryEdited={handleGeometryEdited}
-              onLocationError={(message) =>
-                toast(`Could not get your location: ${message}.`, 'error')
-              }
+              onLocationError={(message) => toast(message, 'error')}
             />
 
             {tool === 'simplify' && selection.size > 0 && (
