@@ -29,12 +29,22 @@ it, and the position it returns stays in the tab. Don't press the button if you 
 rather your browser not do that. Geolocation also needs a secure context, so it works on
 `https://` and on `localhost`, and nowhere else.
 
+Plenty of desktops cannot answer at all — a machine with no GPS depends on a browser
+location service that is often missing, and the honest answer is a **go to coordinates**
+button beside it. Paste a latitude and longitude, a `geo:` link, or a URL copied from
+Google Maps or OpenStreetMap, and the map goes there. That parsing is local string
+handling, which is why a place *name* is not accepted: looking one up would mean calling
+a geocoding service, and this tool does not call anything.
+
 ## How it works
 
 1. **Drop files.** Anything not already in WGS84 is reprojected on import. You then say
    which source column holds the Client, which the Farm and which the Field — whatever
    the file happens to call them, so a column named `organization` can feed Client. Any
-   of the three can be left blank and filled in later.
+   of the three can be left blank and filled in later. Each can also take a **second
+   column** appended to the first, which is how an audit reference survives: a field
+   called Bruno carrying ID 293 arrives as `Bruno (293)`, so the trace back to the
+   source record is not lost the moment the boundary is exported.
 2. **Group into fields.** A *field* is the CropForce unit: one row in the attribute
    table and one MultiPolygon in the export. It can be built from any number of
    polygons, from any number of source files, with holes cut into any of them. What
@@ -45,11 +55,14 @@ rather your browser not do that. Geolocation also needs a secure context, so it 
 3. **Name in bulk where it helps.** Search the list by client, farm, field or source
    file, tick what you find, and set one Client or Farm name across all of it at once.
    Field names stay per-row, because each one names a different field.
-4. **Clean and fix.** The quality panel checks each field and offers two routes for
+4. **Work from the report.** The counts in the quality panel are buttons: click
+   "2 blocking" to select every polygon behind those flags and frame them on the map,
+   or click a single flag's title to go straight to that one.
+5. **Clean and fix.** The quality panel checks each field and offers two routes for
    every flag: an automatic correction, or a manual one that selects the offending
    geometry and arms the right editing tool. Everything, auto-fixes included, is one
    Ctrl+Z away from being undone.
-5. **Export.** One button produces one `.zip` containing `.shp`, `.shx`, `.dbf`, `.prj`
+6. **Export.** One button produces one `.zip` containing `.shp`, `.shx`, `.dbf`, `.prj`
    and `.cpg`, in WGS84, with `Client`, `Farm` and `Field` as 30-character text columns.
 
 ## The data model
@@ -74,12 +87,20 @@ row. Features that belong to no field are not exported, and the quality panel sa
 | Self-intersecting or invalid geometry | yes | un-kink and re-merge the outline |
 | Two fields overlapping | yes | you pick which field keeps the shared area; it is clipped out of the other |
 | Duplicate `Client`/`Farm`/`Field` | yes | number the surplus apart, or combine them if they are one field |
+| A name longer than 30 characters | yes | trim at a word boundary, then keep the results distinct |
 | Jagged, over-dense boundaries | no | simplify at a suggested tolerance, with preview |
 | Non-crop area likely included | no | none — a heuristic hint, hand-corrected with the hole-cut tool |
 | Slivers below 0.05 ha | no | delete |
 | Season-specific field name | no | none — warning only |
 
-The duplicate check is the one that is about the destination rather than the geometry:
+Two of these checks are about the destination rather than the geometry.
+
+Attributes are written as 30-character text columns, so a longer value is cut off when
+the file is written — and two names cut at the same point become one row on upload. The
+length check stops that happening silently; the auto-fix trims at a word boundary where
+there is one close enough to the end to use, and then makes sure nothing has collided.
+
+The duplicate check is the second:
 CropForce identifies a field by its Client/Farm/Field combination, so uploading the same
 combination twice replaces the first with the second and a boundary disappears without
 warning. Case and extra spacing are treated as the same name, because they collide in
@@ -93,8 +114,13 @@ fields, no overlaps, consistent naming — so the tool doubles as guidance.
 
 Draw, vertex edit, move, cut exclusion zones, split with a drawn line, merge, smooth with
 a live preview, and delete. Optional snapping keeps neighbouring fields meeting exactly.
-The map also carries a zoom-to-my-location button, useful when the boundaries you have
-been sent are somewhere you are standing.
+The map carries a zoom-to-my-location button and a go-to-coordinates button beside it,
+for when the boundaries you have been sent are somewhere you need to find.
+
+Satellite imagery is not equally detailed everywhere. Past the depth Esri has for a
+given place it serves a grey "map data not yet available" tile, so the imagery layer
+stops requesting new tiles at zoom 18 and enlarges real imagery beyond that instead of
+showing you a blank grid. The street layer goes one level deeper where that helps.
 
 Keyboard: `V` select, `E` vertices, `M` move, `D` draw, `H` cut hole, `S` split,
 `G` smooth, `Del` delete selection, `Esc` back to select, `Ctrl/Cmd+Z` undo,

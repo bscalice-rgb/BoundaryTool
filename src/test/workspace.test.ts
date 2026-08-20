@@ -27,12 +27,30 @@ import {
   planExport,
   suggestFileName,
 } from '../lib/export';
-import { autoUniquifyNames, fieldGeometries, runChecks } from '../lib/qa';
+import {
+  autoShortenNames,
+  autoUniquifyNames,
+  fieldGeometries,
+  runChecks,
+  shortenToLimit,
+} from '../lib/qa';
 import { areaHa, splitByLine } from '../lib/geo';
+import type { AttributeSource } from '../lib/import';
 import { NO_COLUMNS, importFiles } from '../lib/import';
 
+/** Shorthand for a mapping entry that reads one column and nothing else. */
+const source = (column: string | null): AttributeSource => ({
+  column,
+  extra: null,
+  format: 'parentheses',
+});
+
 /** How the sample KML's own attributes map onto the CropForce three. */
-const KML_COLUMNS = { client: 'Client', farm: 'Farm', field: 'name' };
+const KML_COLUMNS = {
+  client: source('Client'),
+  farm: source('Farm'),
+  field: source('name'),
+};
 import { KML_DOC, fileFrom, poly, squareRing, utmShapefileZip, kmzFile } from './fixtures';
 
 const square = (x: number, y: number, size = 0.003) => poly([squareRing(x, y, size)]);
@@ -267,6 +285,98 @@ describe('duplicate Client/Farm/Field combinations', () => {
   });
 });
 
+describe('names too long for the 30-character column', () => {
+  const LONG = 'North Field Behind The Old Barn At Manor Farm';
+
+  function withLongName(name = LONG): Workspace {
+    let workspace: Workspace = { fields: [], features: [newFeature(square(2.5, 48.8), 'a.zip')] };
+    workspace = combineIntoField(workspace, [workspace.features[0].id]);
+    return updateField(workspace, workspace.fields[0].id, {
+      client: 'Acme',
+      farm: 'Home',
+      field: name,
+    });
+  }
+
+  it('blocks the export rather than letting the export cut the name off', () => {
+    const workspace = withLongName();
+    const flag = runChecks(workspace).find((f) => f.kind === 'name-too-long');
+
+    expect(flag?.severity).toBe('blocking');
+    expect(flag?.detail).toContain(`Field (${LONG.length})`);
+    expect(exportBlockers(runChecks(workspace), planExport(workspace)).blocked).toBe(true);
+  });
+
+  it('names every attribute that is over, not just the first', () => {
+    let workspace = withLongName();
+    workspace = updateField(workspace, workspace.fields[0].id, { client: 'C'.repeat(40) });
+    const flag = runChecks(workspace).find((f) => f.kind === 'name-too-long')!;
+    expect(flag.detail).toContain('Client (40)');
+    expect(flag.detail).toContain(`Field (${LONG.length})`);
+  });
+
+  it('trims at a word boundary rather than mid-word', () => {
+    expect(shortenToLimit(LONG)).toBe('North Field Behind The Old');
+    expect(shortenToLimit(LONG).length).toBeLessThanOrEqual(30);
+  });
+
+  it('falls back to a hard cut when there is no usable word boundary', () => {
+    const solid = 'A'.repeat(45);
+    expect(shortenToLimit(solid)).toBe('A'.repeat(30));
+  });
+
+  it('leaves a name that already fits completely alone', () => {
+    expect(shortenToLimit('Long Acre')).toBe('Long Acre');
+    expect(runChecks(withLongName('Long Acre')).map((f) => f.kind)).not.toContain('name-too-long');
+  });
+
+  it('collapses runs of whitespace, which can be enough on its own', () => {
+    expect(shortenToLimit('  Long     Acre  ')).toBe('Long Acre');
+  });
+
+  it('auto-fix clears the flag and keeps the result inside the column', () => {
+    const workspace = withLongName();
+    const flag = runChecks(workspace).find((f) => f.kind === 'name-too-long')!;
+    const outcome = autoShortenNames(workspace, flag.fieldIds);
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.workspace.fields[0].field.length).toBeLessThanOrEqual(30);
+    expect(runChecks(outcome.workspace).map((f) => f.kind)).not.toContain('name-too-long');
+  });
+
+  it('numbers apart two long names that shorten to the same thing', () => {
+    // Both cut to "North Field Behind The Old", which would be one row in CropForce.
+    let workspace = withLongName(`${LONG} West`);
+    workspace = addDrawnFeature(workspace, square(2.6, 48.8));
+    workspace = combineIntoField(workspace, [workspace.features[1].id]);
+    workspace = updateField(workspace, workspace.fields[1].id, {
+      client: 'Acme',
+      farm: 'Home',
+      field: `${LONG} East`,
+    });
+
+    const flags = runChecks(workspace).filter((f) => f.kind === 'name-too-long');
+    const outcome = autoShortenNames(workspace, flags.flatMap((f) => f.fieldIds));
+
+    const names = outcome.workspace.fields.map((f) => f.field);
+    expect(new Set(names).size).toBe(2);
+    for (const name of names) expect(name.length).toBeLessThanOrEqual(30);
+    const after = runChecks(outcome.workspace).map((f) => f.kind);
+    expect(after).not.toContain('name-too-long');
+    expect(after).not.toContain('duplicate-name');
+  });
+
+  it('survives the round trip through the exported file', async () => {
+    const workspace = withLongName();
+    const flag = runChecks(workspace).find((f) => f.kind === 'name-too-long')!;
+    const fixed = autoShortenNames(workspace, flag.fieldIds).workspace;
+
+    const blob = await buildExportZip(planExport(fixed), 'boundaries');
+    const parsed = (await shp(await blob.arrayBuffer())) as GeoJSON.FeatureCollection;
+    expect(parsed.features[0].properties?.Field).toBe(fixed.fields[0].field);
+  });
+});
+
 describe('bulk attribute editing', () => {
   /** Three fields, each with its own name, sharing nothing yet. */
   function threeFields(): Workspace {
@@ -357,7 +467,7 @@ describe('attribute mapping on import', () => {
         { geometry: square(2.5, 48.8), source: 'a.zip', sourceProps: same },
         { geometry: square(2.6, 48.8), source: 'a.zip', sourceProps: same },
       ],
-      { client: 'Client', farm: 'Farm', field: 'Field' },
+      { client: source('Client'), farm: source('Farm'), field: source('Field') },
     );
 
     // Two blocks with one name are two fields whose names collide, not one field in

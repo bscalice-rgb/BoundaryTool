@@ -99,6 +99,26 @@ body {
   background: var(--color-ink-800);
 }
 
+/* Leaflet's control buttons centre their content with line-height, which an inline
+   <svg> ignores — it sits on the text baseline and looks a pixel or two low. Laying
+   the anchor out as a flex box centres the icon on both axes for real. */
+.map-icon-control a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Clicking a polygon focuses its SVG path, and the browser draws the focus ring around
+   the path's bounding box — a rectangle sitting around a field that is not one. The
+   ring is kept for keyboard users, where it is the only thing showing what is focused. */
+.leaflet-interactive:focus {
+  outline: none;
+}
+.leaflet-interactive:focus-visible {
+  outline: 2px solid var(--color-crop-300);
+  outline-offset: 2px;
+}
+
 /* Geoman's own toolbar is hidden: every tool is driven from the app's toolbar so
    there is one place to look and one place for keyboard shortcuts to hook into. */
 .leaflet-pm-toolbar {

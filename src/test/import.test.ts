@@ -1,5 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { applyMapping, collectColumns, guessMapping, importFiles } from '../lib/import';
+import type { AttributeSource, ColumnMapping, JoinFormat } from '../lib/import';
+import {
+  applyMapping,
+  collectColumns,
+  guessMapping,
+  importFiles,
+  joinValues,
+} from '../lib/import';
+
+/** Shorthand for a mapping entry that reads one column and nothing else. */
+const source = (column: string | null, extra: string | null = null): AttributeSource => ({
+  column,
+  extra,
+  format: 'parentheses',
+});
+
+const columnsOf = (mapping: ColumnMapping) => ({
+  client: mapping.client.column,
+  farm: mapping.farm.column,
+  field: mapping.field.column,
+});
 import { areaHa, bboxOf } from '../lib/geo';
 import {
   KML_DOC,
@@ -221,7 +241,7 @@ describe('choosing which column is which', () => {
   });
 
   it('guesses the obvious synonyms, including organization for client', () => {
-    expect(guessMapping(collectColumns(props))).toEqual({
+    expect(columnsOf(guessMapping(collectColumns(props)))).toEqual({
       client: 'organization',
       farm: 'holding',
       field: 'parcel_ref',
@@ -230,29 +250,82 @@ describe('choosing which column is which', () => {
 
   it('leaves an attribute unguessed rather than pointing it at the wrong column', () => {
     const columns = collectColumns([{ grower: 'Acme', ref: 'A1' }]);
-    expect(guessMapping(columns)).toEqual({ client: 'grower', farm: null, field: null });
+    expect(columnsOf(guessMapping(columns))).toEqual({
+      client: 'grower',
+      farm: null,
+      field: null,
+    });
   });
 
   it('never points two attributes at the same column', () => {
     // "name" matches the field hint; nothing else matches, so farm stays blank.
     const columns = collectColumns([{ name: 'Long Acre' }]);
-    const mapping = guessMapping(columns);
-    const used = [mapping.client, mapping.farm, mapping.field].filter((k) => k !== null);
+    const chosen = columnsOf(guessMapping(columns));
+    const used = [chosen.client, chosen.farm, chosen.field].filter((k) => k !== null);
     expect(new Set(used).size).toBe(used.length);
   });
 
   it('reads a feature through whatever mapping the user picked', () => {
     expect(
-      applyMapping(props[0], { client: 'organization', farm: null, field: 'parcel_ref' }),
+      applyMapping(props[0], {
+        client: source('organization'),
+        farm: source(null),
+        field: source('parcel_ref'),
+      }),
     ).toEqual({ client: 'Acme Ltd', farm: '', field: 'Long Acre' });
   });
 
   it('stringifies numbers, so a numeric field reference still carries across', () => {
-    expect(applyMapping({ ref: 42 }, { client: null, farm: null, field: 'ref' }).field).toBe('42');
+    expect(
+      applyMapping({ ref: 42 }, { client: source(null), farm: source(null), field: source('ref') })
+        .field,
+    ).toBe('42');
   });
 
   it('counts values that the 30-character column would shorten', () => {
     const columns = collectColumns([{ long: 'X'.repeat(31) }, { long: 'short' }]);
     expect(columns[0].tooLong).toBe(1);
+  });
+});
+
+describe('keeping an audit reference in the field name', () => {
+  const props = { name: 'Bruno', field_id: 293, org: 'Acme' };
+
+  it('combines the name with a second column', () => {
+    expect(
+      applyMapping(props, {
+        client: source('org'),
+        farm: source(null),
+        field: source('name', 'field_id'),
+      }).field,
+    ).toBe('Bruno (293)');
+  });
+
+  it('offers the join formats people actually use', () => {
+    const cases: [JoinFormat, string][] = [
+      ['parentheses', 'Bruno (293)'],
+      ['dash', 'Bruno - 293'],
+      ['space', 'Bruno 293'],
+      ['prefix', '293 - Bruno'],
+    ];
+    for (const [format, expected] of cases) {
+      expect(joinValues('Bruno', '293', format)).toBe(expected);
+    }
+  });
+
+  it('falls back to whichever side has a value', () => {
+    expect(joinValues('Bruno', '', 'parentheses')).toBe('Bruno');
+    expect(joinValues('', '293', 'parentheses')).toBe('293');
+    expect(joinValues('', '', 'parentheses')).toBe('');
+  });
+
+  it('leaves a feature that has no reference with just its name', () => {
+    expect(
+      applyMapping({ name: 'Bruno' }, {
+        client: source(null),
+        farm: source(null),
+        field: source('name', 'field_id'),
+      }).field,
+    ).toBe('Bruno');
   });
 });

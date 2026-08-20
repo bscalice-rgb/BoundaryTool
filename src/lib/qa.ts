@@ -91,6 +91,11 @@ export const GUIDANCE: Record<FlagKind, string> = {
     'one field, not several.',
   'empty-field':
     'A field row needs geometry. Assign at least one polygon to it, or delete the field.',
+  'name-too-long':
+    'Client, Farm and Field are written as 30-character text columns. Anything longer is ' +
+    'cut off when the file is written, and a name that has been cut off can collide with ' +
+    'another that was cut off at the same point — so two fields become one on upload. ' +
+    'Shorten them here, where you can see what you are losing.',
   'duplicate-name':
     'CropForce identifies a field by its Client, Farm and Field combination, so that ' +
     'combination has to be unique. Upload two rows with the same one and the second ' +
@@ -235,6 +240,35 @@ export function runChecks(
         });
       }
     }
+  }
+
+  /*
+   * Values that will not survive the 30-character column. The export truncates them
+   * silently, which is the sort of loss you only notice months later, so it is stopped
+   * here instead.
+   */
+  const overLong = fields.filter(({ field }) =>
+    (['client', 'farm', 'field'] as const).some((key) => field[key].trim().length > NAME_LIMIT),
+  );
+  for (const entry of overLong) {
+    const columns = (['client', 'farm', 'field'] as const)
+      .filter((key) => entry.field[key].trim().length > NAME_LIMIT)
+      .map((key) => `${capitalise(key)} (${entry.field[key].trim().length})`);
+    flags.push({
+      id: `toolong:${entry.field.id}`,
+      kind: 'name-too-long',
+      severity: 'blocking',
+      title: `${describeField(entry.field)} — name too long for the column`,
+      detail:
+        `${columns.join(', ')} ${columns.length === 1 ? 'exceeds' : 'exceed'} the ` +
+        `${NAME_LIMIT}-character limit and would be cut off on export. Auto-fix trims at a ` +
+        'word boundary and keeps every name distinct.',
+      guidance: GUIDANCE['name-too-long'],
+      featureIds: entry.featureIds,
+      fieldIds: [entry.field.id],
+      autoFix: { kind: 'shorten-names' },
+      manual: 'attributes',
+    });
   }
 
   /*
@@ -522,8 +556,8 @@ export function nameKey(field: Pick<WField, 'client' | 'farm' | 'field'>): strin
     .join(' | ');
 }
 
-/** DBF character width for a Field value, mirrored from the export schema. */
-const FIELD_NAME_LIMIT = 30;
+/** DBF character width for every attribute, mirrored from the export schema. */
+export const NAME_LIMIT = 30;
 
 /**
  * Numbers a duplicated field name apart: "Long Acre" becomes "Long Acre (2)", trimmed
@@ -532,7 +566,7 @@ const FIELD_NAME_LIMIT = 30;
 export function uniqueFieldName(field: WField, taken: ReadonlySet<string>): string {
   for (let n = 2; n < 1000; n++) {
     const suffix = ` (${n})`;
-    const base = field.field.trim().slice(0, FIELD_NAME_LIMIT - suffix.length).trimEnd();
+    const base = field.field.trim().slice(0, NAME_LIMIT - suffix.length).trimEnd();
     const candidate = `${base}${suffix}`;
     if (!taken.has(nameKey({ ...field, field: candidate }))) return candidate;
   }
@@ -573,6 +607,56 @@ export function autoUniquifyNames(workspace: Workspace, fieldIds: FieldId[]): Fi
   };
 }
 
+/**
+ * Trims a value to the column width, cutting at a word boundary where one is close
+ * enough to the end to be worth using. Cutting mid-word reads as a mistake; cutting at
+ * a space reads as an abbreviation.
+ */
+export function shortenToLimit(value: string): string {
+  const collapsed = value.trim().replace(/\s+/g, ' ');
+  if (collapsed.length <= NAME_LIMIT) return collapsed;
+
+  const cut = collapsed.slice(0, NAME_LIMIT);
+  const lastSpace = cut.lastIndexOf(' ');
+  // Only honour a word boundary in the last third; earlier than that loses too much.
+  return (lastSpace > NAME_LIMIT * 0.66 ? cut.slice(0, lastSpace) : cut).trimEnd();
+}
+
+/**
+ * Shortens every over-length value on the named fields, then makes sure the results are
+ * still distinct — two long names cut at the same point would otherwise become one row.
+ */
+export function autoShortenNames(workspace: Workspace, fieldIds: FieldId[]): FixOutcome {
+  const target = new Set(fieldIds);
+  let shortened = 0;
+
+  const fields = workspace.fields.map((field) => {
+    if (!target.has(field.id)) return field;
+    const next = { ...field };
+    for (const key of ['client', 'farm', 'field'] as const) {
+      if (next[key].trim().length <= NAME_LIMIT) continue;
+      next[key] = shortenToLimit(next[key]);
+      shortened++;
+    }
+    return next;
+  });
+
+  if (shortened === 0) {
+    return { workspace, message: 'Every name already fits.', ok: false };
+  }
+
+  // Shortening can turn two distinct names into the same one, so settle that here
+  // rather than leaving the user with a fresh duplicate flag to chase.
+  const settled = autoUniquifyNames({ ...workspace, fields }, fields.map((f) => f.id));
+  const collisions = settled.ok ? ' Two of them then matched, so they were numbered apart.' : '';
+
+  return {
+    workspace: settled.ok ? settled.workspace : { ...workspace, fields },
+    message: `Shortened ${shortened} name${shortened === 1 ? '' : 's'} to ${NAME_LIMIT} characters.${collisions}`,
+    ok: true,
+  };
+}
+
 /* -------------------------------------------------------------------------- */
 /* Blocking status                                                             */
 /* -------------------------------------------------------------------------- */
@@ -583,6 +667,7 @@ export const BLOCKING_KINDS: FlagKind[] = [
   'overlap',
   'empty-field',
   'duplicate-name',
+  'name-too-long',
 ];
 
 /** Field ids that cannot be exported, mapped to the reasons why. */

@@ -9,6 +9,8 @@ export interface QAPanelProps {
   fieldCount: number;
   onAutoFix: (flag: QAFlag) => void;
   onFixManually: (flag: QAFlag) => void;
+  /** Selects the polygons behind these flags and frames them on the map. */
+  onSelectFlagged: (flags: QAFlag[]) => void;
   onExport: () => void;
 }
 
@@ -39,16 +41,29 @@ export default function QAPanel(props: QAPanelProps) {
 
       <div className="shrink-0 border-b border-ink-800 px-3 py-2.5">
         <div className="mb-2 flex items-center gap-3 text-[11px]">
-          <span className="flex items-center gap-1.5">
-            <Dot tone={blocking.length > 0 ? 'red' : 'green'} />
-            <span className="text-ink-300">
-              {blocking.length} blocking
-            </span>
-          </span>
-          <span className="flex items-center gap-1.5">
-            <Dot tone={warnings.length > 0 ? 'amber' : 'grey'} />
-            <span className="text-ink-300">{warnings.length} to review</span>
-          </span>
+          <SelectableCount
+            tone={blocking.length > 0 ? 'red' : 'green'}
+            label={`${blocking.length} blocking`}
+            flags={blocking}
+            onSelect={props.onSelectFlagged}
+          />
+          <SelectableCount
+            tone={warnings.length > 0 ? 'amber' : 'grey'}
+            label={`${warnings.length} to review`}
+            flags={warnings}
+            onSelect={props.onSelectFlagged}
+          />
+          {props.flags.length > 0 && (
+            <button
+              type="button"
+              onClick={() => props.onSelectFlagged(props.flags)}
+              title="Select every polygon that has a flag against it, and frame them on the map"
+              className="ml-auto rounded px-1.5 py-0.5 text-[10px] text-ink-400
+                hover:bg-ink-800 hover:text-crop-300"
+            >
+              Select all flagged
+            </button>
+          )}
         </div>
         <Button tone="primary" onClick={props.onExport} className="w-full">
           Export merged shapefile for CropForce
@@ -87,15 +102,50 @@ export default function QAPanel(props: QAPanelProps) {
 
 /* -------------------------------------------------------------------------- */
 
+/** A count that doubles as a way to select everything it counts. */
+function SelectableCount({
+  tone,
+  label,
+  flags,
+  onSelect,
+}: {
+  tone: 'red' | 'amber' | 'green' | 'grey';
+  label: string;
+  flags: QAFlag[];
+  onSelect: (flags: QAFlag[]) => void;
+}) {
+  const selectable = flags.some((flag) => flag.featureIds.length > 0);
+  if (!selectable) {
+    return (
+      <span className="flex items-center gap-1.5">
+        <Dot tone={tone} />
+        <span className="text-ink-300">{label}</span>
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(flags)}
+      title="Select these polygons and frame them on the map"
+      className="flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-ink-800"
+    >
+      <Dot tone={tone} />
+      <span className="text-ink-300 underline decoration-dotted underline-offset-2">{label}</span>
+    </button>
+  );
+}
+
 function FlagCard({
   flag,
   active,
   onAutoFix,
   onFixManually,
+  onSelectFlagged,
 }: {
   flag: QAFlag;
   active: boolean;
-} & Pick<QAPanelProps, 'onAutoFix' | 'onFixManually'>) {
+} & Pick<QAPanelProps, 'onAutoFix' | 'onFixManually' | 'onSelectFlagged'>) {
   const blocking = flag.severity === 'blocking';
   return (
     <article
@@ -103,9 +153,21 @@ function FlagCard({
     >
       <div className="flex items-start gap-2">
         <Dot tone={blocking ? 'red' : 'amber'} className="mt-1" />
-        <h3 className="min-w-0 flex-1 text-[12px] leading-snug font-medium text-ink-100">
-          {flag.title}
-        </h3>
+        {flag.featureIds.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => onSelectFlagged([flag])}
+            title="Select this field's polygons and frame them on the map"
+            className="min-w-0 flex-1 text-left text-[12px] leading-snug font-medium text-ink-100
+              hover:text-crop-300"
+          >
+            {flag.title}
+          </button>
+        ) : (
+          <h3 className="min-w-0 flex-1 text-[12px] leading-snug font-medium text-ink-100">
+            {flag.title}
+          </h3>
+        )}
         <InfoDot text={flag.guidance} label={FLAG_LABELS[flag.kind]} />
       </div>
 
@@ -144,6 +206,7 @@ const FLAG_LABELS: Record<QAFlag['kind'], string> = {
   unassigned: 'Multi-polygon fields',
   'empty-field': 'Single continuous zone',
   'duplicate-name': 'Consistent naming',
+  'name-too-long': 'Consistent naming',
 };
 
 function SectionLabel({ children }: { children: React.ReactNode }) {

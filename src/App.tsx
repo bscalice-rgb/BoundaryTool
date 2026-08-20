@@ -1,5 +1,5 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import type { BBox, LineString, Polygon } from 'geojson';
+import type { BBox, LineString, Polygon, Position } from 'geojson';
 import type {
   Basemap,
   FeatureId,
@@ -29,9 +29,11 @@ import {
 } from './state/ops';
 import { type ColumnMapping, type ImportReport, importFiles } from './lib/import';
 import { areaHa, bboxOf, simplifyMeters, splitByLine, vertexCount } from './lib/geo';
+import { formatLatLon } from './lib/coords';
 import {
   autoDeleteFeatures,
   autoFixGeometry,
+  autoShortenNames,
   autoSimplify,
   autoUniquifyNames,
   resolveOverlap,
@@ -51,7 +53,12 @@ import Toolbar, { HistoryButtons, SmoothingPanel } from './components/Toolbar';
 import LeftPanel, { type AttributeFocus } from './components/LeftPanel';
 import QAPanel from './components/QAPanel';
 import EmptyState from './components/EmptyState';
-import { ExportDialog, ImportDialog, OverlapDialog } from './components/dialogs';
+import {
+  CoordinatesDialog,
+  ExportDialog,
+  ImportDialog,
+  OverlapDialog,
+} from './components/dialogs';
 import { ToastStack, type Toast } from './components/ui';
 
 const ACCEPTED = '.kml,.kmz,.zip,.geojson,.json,.shp,.shx,.dbf,.prj,.cpg';
@@ -79,6 +86,8 @@ export default function App() {
   /** Once the user types their own file name, stop re-suggesting one over the top of it. */
   const [fileNameEdited, setFileNameEdited] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [coordinatesOpen, setCoordinatesOpen] = useState(false);
+  const [goTo, setGoTo] = useState<{ position: Position; nonce: number } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nonceRef = useRef(0);
@@ -346,7 +355,9 @@ export default function App() {
             ? autoDeleteFeatures(workspace, flag.featureIds)
             : spec.kind === 'uniquify-names'
               ? autoUniquifyNames(workspace, flag.fieldIds)
-              : autoSimplify(workspace, flag.featureIds, spec.toleranceMeters);
+              : spec.kind === 'shorten-names'
+                ? autoShortenNames(workspace, flag.fieldIds)
+                : autoSimplify(workspace, flag.featureIds, spec.toleranceMeters);
 
       if (!outcome.ok) {
         toast(outcome.message, 'error');
@@ -356,6 +367,24 @@ export default function App() {
       toast(`${outcome.message} Ctrl+Z undoes it.`);
     },
     [apply, workspace, toast],
+  );
+
+  /** Selects every polygon behind the given flags and frames them on the map. */
+  const handleSelectFlagged = useCallback(
+    (chosen: QAFlag[]) => {
+      const ids = [...new Set(chosen.flatMap((flag) => flag.featureIds))].filter((id) =>
+        workspace.features.some((feature) => feature.id === id),
+      );
+      if (ids.length === 0) {
+        toast('Those flags are about field rows rather than polygons on the map.', 'error');
+        return;
+      }
+      setActiveFlagId(chosen.length === 1 ? chosen[0].id : null);
+      setSelection(new Set(ids));
+      zoomTo(ids);
+      setTool('select');
+    },
+    [workspace.features, zoomTo, toast],
   );
 
   const handleFixManually = useCallback(
@@ -681,6 +710,8 @@ export default function App() {
               onSplitLine={handleSplitLine}
               onGeometryEdited={handleGeometryEdited}
               onLocationError={(message) => toast(message, 'error')}
+              onOpenCoordinates={() => setCoordinatesOpen(true)}
+              goTo={goTo}
             />
 
             {tool === 'simplify' && selection.size > 0 && (
@@ -719,6 +750,7 @@ export default function App() {
             fieldCount={workspace.fields.length}
             onAutoFix={handleAutoFix}
             onFixManually={handleFixManually}
+            onSelectFlagged={handleSelectFlagged}
             onExport={openExport}
           />
         </aside>
@@ -738,6 +770,18 @@ export default function App() {
           workspace={workspace}
           onResolve={handleResolveOverlap}
           onCancel={() => setOverlapPair(null)}
+        />
+      )}
+
+      {coordinatesOpen && (
+        <CoordinatesDialog
+          onGo={(position) => {
+            nonceRef.current += 1;
+            setGoTo({ position, nonce: nonceRef.current });
+            setCoordinatesOpen(false);
+            toast(`Moved the map to ${formatLatLon(position)}.`);
+          }}
+          onClose={() => setCoordinatesOpen(false)}
         />
       )}
 

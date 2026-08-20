@@ -137,7 +137,7 @@ test('groups polygons from different files into one field and exports it', async
   await page.goto('/');
   await importFixtures(page);
 
-  await page.getByRole('button', { name: 'Select all' }).click();
+  await page.getByRole('button', { name: 'Select all', exact: true }).click();
   await expect(page.getByText('4 polygons selected')).toBeVisible();
   await page.getByRole('button', { name: 'Combine into one field' }).click();
 
@@ -200,7 +200,7 @@ test('runs a QA auto-fix and undoes it', async ({ page }) => {
   await page.goto('/');
   await importFixtures(page);
 
-  await page.getByRole('button', { name: 'Select all' }).click();
+  await page.getByRole('button', { name: 'Select all', exact: true }).click();
   await page.getByRole('button', { name: 'Combine into one field' }).click();
 
   const flag = page.locator('article', { hasText: 'attribute' }).first();
@@ -329,7 +329,7 @@ test('resolves an overlap between two fields and undoes the clip', async ({ page
   await page.mouse.click(cx + 200, cy + 80);
   await page.mouse.dblclick(cx, cy + 80);
 
-  await page.getByRole('button', { name: 'Select all' }).click();
+  await page.getByRole('button', { name: 'Select all', exact: true }).click();
   await page.getByRole('button', { name: 'Combine into one field' }).click();
   await attributeCell(page, 'client').nth(1).fill('Acme');
   await attributeCell(page, 'farm').nth(1).fill('Home');
@@ -639,6 +639,110 @@ test.describe('duplicate Client/Farm/Field', () => {
     await expect(page.locator('article', { hasText: 'share the name' })).toBeHidden();
     await expect(page.locator('input[aria-label="field"]')).toHaveCount(1);
   });
+});
+
+test.describe('going somewhere without geolocation', () => {
+  test('jumps to a pasted coordinate', async ({ page }) => {
+    await page.goto('/');
+    await importFixtures(page);
+
+    await page.getByRole('button', { name: 'Go to coordinates' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Go to coordinates' });
+    await dialog.getByLabel('Latitude and longitude').fill('48.8566, 2.3522');
+    await expect(dialog.getByText('Reads as 48.85660, 2.35220')).toBeVisible();
+
+    await dialog.getByRole('button', { name: 'Go', exact: true }).click();
+    await expect(page.locator('.location-dot')).toBeVisible();
+    await expect(page.locator('.leaflet-control-scale-line').first()).toHaveText(/\bm$/);
+  });
+
+  test('accepts a pasted map link', async ({ page }) => {
+    await page.goto('/');
+    await importFixtures(page);
+
+    await page.getByRole('button', { name: 'Go to coordinates' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Go to coordinates' });
+    await dialog.getByLabel('Latitude and longitude').fill(
+      'https://www.google.com/maps/@48.8566,2.3522,15z',
+    );
+    await expect(dialog.getByRole('button', { name: 'Go', exact: true })).toBeEnabled();
+  });
+
+  test('refuses a place name and says why', async ({ page }) => {
+    await page.goto('/');
+    await importFixtures(page);
+
+    await page.getByRole('button', { name: 'Go to coordinates' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Go to coordinates' });
+    await dialog.getByLabel('Latitude and longitude').fill('Paris');
+    await expect(dialog.getByText(/needs an online lookup/)).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Go', exact: true })).toBeDisabled();
+  });
+});
+
+test('keeps an audit reference in the field name', async ({ page }) => {
+  await page.goto('/');
+  await page.setInputFiles('input[type=file]', FILES);
+  const dialog = page.getByRole('dialog', { name: 'Import boundaries' });
+
+  await dialog.getByLabel('field column').selectOption('name');
+  await dialog.getByLabel('field second column').selectOption('Client');
+  await expect(dialog.getByText('e.g. “Church Field (Bell Farms)”')).toBeVisible();
+
+  await dialog.getByLabel('field join format').selectOption('dash');
+  await expect(dialog.getByText('e.g. “Church Field - Bell Farms”')).toBeVisible();
+
+  await dialog.getByLabel('field join format').selectOption('parentheses');
+  await page.getByRole('button', { name: 'Add to workspace' }).click();
+
+  const names = await page
+    .locator('input[aria-label="field"]')
+    .evaluateAll((inputs) => (inputs as HTMLInputElement[]).map((input) => input.value));
+  expect(names).toContain('Church Field (Bell Farms)');
+});
+
+test('shortens a name that will not fit the column', async ({ page }) => {
+  await page.goto('/');
+  await importFixtures(page);
+  await page.getByRole('button', { name: 'Select all', exact: true }).click();
+  await page.getByRole('button', { name: 'Combine into one field' }).click();
+
+  await attributeCell(page, 'client').first().fill('Acme');
+  await attributeCell(page, 'farm').first().fill('Home');
+  // maxlength stops this being typed, so it goes in the way a real one does: from data.
+  await attributeCell(page, 'field').first().evaluate((node) => {
+    const input = node as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      'value',
+    )!.set!;
+    setter.call(input, 'North Field Behind The Old Barn At Manor Farm');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+
+  const flag = page.locator('article', { hasText: 'too long for the column' });
+  await expect(flag).toBeVisible();
+  await expect(flag).toContainText('Field (45)');
+
+  await flag.getByRole('button', { name: 'Auto-fix' }).click();
+  await expect(attributeCell(page, 'field').first()).toHaveValue('North Field Behind The Old');
+  await expect(page.getByText('0 blocking')).toBeVisible();
+});
+
+test('selects the boundaries behind the flags', async ({ page }) => {
+  await page.goto('/');
+  await importFixtures(page);
+  await page.getByRole('button', { name: 'Select all', exact: true }).click();
+  await page.getByRole('button', { name: 'Combine into one field' }).click();
+  await page.locator('body').click();
+  await expect(page.getByText('Nothing selected')).toBeVisible();
+
+  // The blocking count doubles as a way to select everything it counts.
+  await page.getByRole('button', { name: /blocking/ }).click();
+  await expect(page.getByText('4 polygons selected')).toBeVisible();
+  // The four fixtures straddle two countries, so framing them all zooms out, not in —
+  // the point is that the view moved to them at all.
+  await expect(page.locator('.leaflet-control-scale-line').first()).not.toHaveText('50 km');
 });
 
 test('keeps nothing across a reload and contacts only basemap hosts', async ({ page }) => {

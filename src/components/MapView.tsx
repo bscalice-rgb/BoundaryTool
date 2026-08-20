@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import '@geoman-io/leaflet-geoman-free';
-import type { BBox, LineString, Polygon } from 'geojson';
+import type { BBox, LineString, Polygon, Position } from 'geojson';
 import type { Basemap, FeatureId, PolyGeom, Tool, WFeature, Workspace } from '../types';
 import { areaHa, formatHa } from '../lib/geo';
 
@@ -19,6 +19,9 @@ const OSM_ATTRIBUTION =
 
 const SNAP_DISTANCE = 18;
 
+/** Deeper than this, upscaled tiles are too soft to trace against. */
+const MAX_ZOOM = 20;
+
 export interface FocusRequest {
   bbox: BBox;
   /** Bumped on every request so repeating the same zoom still fires. */
@@ -32,7 +35,7 @@ export interface FocusRequest {
 function locateControl(onClick: () => void): L.Control {
   const control = new L.Control({ position: 'topleft' });
   control.onAdd = () => {
-    const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control locate-control');
+    const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control map-icon-control locate-control');
     const link = L.DomUtil.create('a', '', container);
     link.href = '#';
     link.setAttribute('role', 'button');
@@ -73,6 +76,34 @@ function describeLocationError(event: L.ErrorEvent): string {
   }
 }
 
+/**
+ * The "go to coordinates" control. It is the fallback for the very common case of a
+ * desktop browser that cannot work out where it is: the user says where instead.
+ */
+function coordinateControl(onClick: () => void): L.Control {
+  const control = new L.Control({ position: 'topleft' });
+  control.onAdd = () => {
+    const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control map-icon-control');
+    const link = L.DomUtil.create('a', '', container);
+    link.href = '#';
+    link.setAttribute('role', 'button');
+    link.setAttribute('aria-label', 'Go to coordinates');
+    link.title = 'Jump to a latitude and longitude, or a map link you have pasted';
+    link.innerHTML =
+      '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M8 14.5s5-4.6 5-8.2A5 5 0 0 0 3 6.3c0 3.6 5 8.2 5 8.2z"/>' +
+      '<circle cx="8" cy="6.2" r="1.8"/></svg>';
+    L.DomEvent.disableClickPropagation(container);
+    L.DomEvent.on(link, 'click', (event) => {
+      L.DomEvent.stop(event);
+      onClick();
+    });
+    return container;
+  };
+  return control;
+}
+
 export interface MapViewProps {
   workspace: Workspace;
   selection: ReadonlySet<FeatureId>;
@@ -90,6 +121,10 @@ export interface MapViewProps {
   onGeometryEdited: (featureId: FeatureId, geometry: PolyGeom) => void;
   /** Surfaced when the browser refuses or fails to report a position. */
   onLocationError: (message: string) => void;
+  /** Opens the "go to coordinates" prompt, which lives in the app's dialog layer. */
+  onOpenCoordinates: () => void;
+  /** A position to centre on, set when the user confirms a coordinate jump. */
+  goTo: { position: Position; nonce: number } | null;
 }
 
 export default function MapView(props: MapViewProps) {
@@ -123,6 +158,7 @@ export default function MapView(props: MapViewProps) {
     const map = L.map(containerRef.current, {
       center: [50.5, 4.5],
       zoom: 5,
+      maxZoom: MAX_ZOOM,
       zoomControl: true,
       preferCanvas: false,
       // Shift-drag is claimed by box zoom by default, which fights with selection.
@@ -130,9 +166,21 @@ export default function MapView(props: MapViewProps) {
     });
     mapRef.current = map;
 
+    // Esri's imagery is not equally deep everywhere: past its coverage it serves a grey
+    // "Map data not yet available" tile rather than nothing, which looks like a broken
+    // map. Capping the native zoom at 18 — a level it has almost worldwide — means deeper
+    // views upscale real imagery instead. OSM tiles are drawn to 19 and can go one closer.
     tileLayersRef.current = {
-      imagery: L.tileLayer(ESRI_IMAGERY, { attribution: ESRI_ATTRIBUTION, maxZoom: 21, maxNativeZoom: 19 }),
-      street: L.tileLayer(OSM_TILES, { attribution: OSM_ATTRIBUTION, maxZoom: 21, maxNativeZoom: 19 }),
+      imagery: L.tileLayer(ESRI_IMAGERY, {
+        attribution: ESRI_ATTRIBUTION,
+        maxZoom: MAX_ZOOM,
+        maxNativeZoom: 18,
+      }),
+      street: L.tileLayer(OSM_TILES, {
+        attribution: OSM_ATTRIBUTION,
+        maxZoom: MAX_ZOOM,
+        maxNativeZoom: 19,
+      }),
     };
     tileLayersRef.current.imagery!.addTo(map);
 
@@ -176,6 +224,8 @@ export default function MapView(props: MapViewProps) {
       }
       startLocate(false);
     }).addTo(map);
+
+    coordinateControl(() => propsRef.current.onOpenCoordinates()).addTo(map);
 
     map.on('locationfound', (event: L.LocationEvent) => {
       locateAttemptRef.current = 'idle';
@@ -447,6 +497,29 @@ export default function MapView(props: MapViewProps) {
     previewLayerRef.current = layer;
   }, [props.preview]);
 
+  /* ------------------------------------------------------ coordinate jump */
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !props.goTo) return;
+    const [lon, lat] = props.goTo.position;
+    map.setView([lat, lon], Math.max(map.getZoom(), 15));
+
+    // The same marker the locate button drops, so a jump reads the same as a fix.
+    locationLayerRef.current?.remove();
+    locationLayerRef.current = L.layerGroup([
+      L.circleMarker([lat, lon], {
+        radius: 5,
+        className: 'location-dot',
+        color: '#ffffff',
+        weight: 2,
+        fillColor: '#38bdf8',
+        fillOpacity: 1,
+        interactive: false,
+      }),
+    ]).addTo(map);
+  }, [props.goTo]);
+
   /* ---------------------------------------------------------------- focus */
 
   useEffect(() => {
@@ -459,7 +532,7 @@ export default function MapView(props: MapViewProps) {
         [minY, minX],
         [maxY, maxX],
       ]),
-      { padding: [80, 80], maxZoom: 18 },
+      { padding: [80, 80], maxZoom: MAX_ZOOM - 2 },
     );
   }, [props.focus]);
 

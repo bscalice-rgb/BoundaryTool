@@ -443,17 +443,60 @@ const words = (key: string): string[] =>
 
 export type AttributeTarget = 'client' | 'farm' | 'field';
 
+/** How a second column is joined onto the first. */
+export type JoinFormat = 'parentheses' | 'dash' | 'space' | 'prefix';
+
+export const JOIN_FORMATS: { id: JoinFormat; label: string; example: string }[] = [
+  { id: 'parentheses', label: 'Name (extra)', example: 'Bruno (293)' },
+  { id: 'dash', label: 'Name - extra', example: 'Bruno - 293' },
+  { id: 'space', label: 'Name extra', example: 'Bruno 293' },
+  { id: 'prefix', label: 'extra - Name', example: '293 - Bruno' },
+];
+
 /**
- * Which source column feeds each CropForce attribute. `null` means "leave blank", which
- * is a legitimate choice: a file may simply not carry a Farm.
+ * Where one CropForce attribute gets its value.
+ *
+ * `column` is the main source; `null` means "leave blank", which is a legitimate choice
+ * when a file simply has no Farm. `extra` optionally appends a second column, which is
+ * how an audit reference survives: a field called Bruno that carries ID 293 elsewhere
+ * can arrive as "Bruno (293)", so the trace back to the source record is not lost the
+ * moment the boundary is exported.
  */
-export interface ColumnMapping {
-  client: string | null;
-  farm: string | null;
-  field: string | null;
+export interface AttributeSource {
+  column: string | null;
+  extra: string | null;
+  format: JoinFormat;
 }
 
-export const NO_COLUMNS: ColumnMapping = { client: null, farm: null, field: null };
+export type ColumnMapping = Record<AttributeTarget, AttributeSource>;
+
+const blankSource = (): AttributeSource => ({
+  column: null,
+  extra: null,
+  format: 'parentheses',
+});
+
+export const NO_COLUMNS: ColumnMapping = {
+  client: blankSource(),
+  farm: blankSource(),
+  field: blankSource(),
+};
+
+/** Joins a value with its audit reference. Either side alone is used as-is. */
+export function joinValues(main: string, extra: string, format: JoinFormat): string {
+  if (extra === '') return main;
+  if (main === '') return extra;
+  switch (format) {
+    case 'dash':
+      return `${main} - ${extra}`;
+    case 'space':
+      return `${main} ${extra}`;
+    case 'prefix':
+      return `${extra} - ${main}`;
+    default:
+      return `${main} (${extra})`;
+  }
+}
 
 export interface SourceColumn {
   key: string;
@@ -494,15 +537,19 @@ export function collectColumns(featuresProps: Record<string, unknown>[]): Source
  * A column already claimed is never handed to a second attribute.
  */
 export function guessMapping(columns: SourceColumn[]): ColumnMapping {
-  const mapping: ColumnMapping = { client: null, farm: null, field: null };
+  const mapping: ColumnMapping = {
+    client: blankSource(),
+    farm: blankSource(),
+    field: blankSource(),
+  };
   const targets: AttributeTarget[] = ['client', 'farm', 'field'];
   const claimed = new Set<string>();
 
   const claim = (target: AttributeTarget, matches: (column: SourceColumn) => boolean) => {
-    if (mapping[target] !== null) return;
+    if (mapping[target].column !== null) return;
     const hit = columns.find((column) => !claimed.has(column.key) && matches(column));
     if (!hit) return;
-    mapping[target] = hit.key;
+    mapping[target].column = hit.key;
     claimed.add(hit.key);
   };
 
@@ -520,20 +567,32 @@ export function guessMapping(columns: SourceColumn[]): ColumnMapping {
   return mapping;
 }
 
+/** Reads one attribute out of a feature's source data. */
+export function readSource(
+  props: Record<string, unknown>,
+  source: AttributeSource,
+): string {
+  const main = source.column === null ? '' : stringify(props[source.column]);
+  const extra = source.extra === null ? '' : stringify(props[source.extra]);
+  return joinValues(main, extra, source.format);
+}
+
 /** Reads the three attributes out of one feature's source data, per the chosen mapping. */
 export function applyMapping(
   props: Record<string, unknown>,
   mapping: ColumnMapping,
 ): { client: string; farm: string; field: string } {
   return {
-    client: mapping.client === null ? '' : stringify(props[mapping.client]),
-    farm: mapping.farm === null ? '' : stringify(props[mapping.farm]),
-    field: mapping.field === null ? '' : stringify(props[mapping.field]),
+    client: readSource(props, mapping.client),
+    farm: readSource(props, mapping.farm),
+    field: readSource(props, mapping.field),
   };
 }
 
 export const mappingIsEmpty = (mapping: ColumnMapping): boolean =>
-  mapping.client === null && mapping.farm === null && mapping.field === null;
+  (['client', 'farm', 'field'] as AttributeTarget[]).every(
+    (target) => mapping[target].column === null && mapping[target].extra === null,
+  );
 
 function stringify(value: unknown): string {
   if (value === null || value === undefined) return '';

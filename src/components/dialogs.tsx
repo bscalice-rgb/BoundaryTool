@@ -1,7 +1,15 @@
 import { useMemo, useState } from 'react';
+import type { Position } from 'geojson';
 import type { WField, Workspace } from '../types';
-import type { AttributeTarget, ColumnMapping, ImportReport } from '../lib/import';
-import { collectColumns, guessMapping } from '../lib/import';
+import { formatLatLon, parseLatLon } from '../lib/coords';
+import type {
+  AttributeSource,
+  AttributeTarget,
+  ColumnMapping,
+  ImportReport,
+  JoinFormat,
+} from '../lib/import';
+import { JOIN_FORMATS, collectColumns, guessMapping, readSource } from '../lib/import';
 import type { ExportBlockers, ExportPlan } from '../lib/export';
 import { describeField } from '../lib/qa';
 import { Button, Modal } from './ui';
@@ -26,17 +34,30 @@ export function ImportDialog({
   const [mapping, setMapping] = useState<ColumnMapping>(() => guessMapping(columns));
 
   const sources = [...new Set(report.features.map((f) => f.source))];
-  const byKey = new Map(columns.map((column) => [column.key, column]));
 
   const choose = (target: AttributeTarget, key: string | null) =>
     setMapping((current) => {
-      const next = { ...current, [target]: key };
+      const next = { ...current, [target]: { ...current[target], column: key } };
       // One column cannot fill two attributes, so picking it here releases it there.
       for (const other of ['client', 'farm', 'field'] as AttributeTarget[]) {
-        if (other !== target && key !== null && next[other] === key) next[other] = null;
+        if (other !== target && key !== null && next[other].column === key) {
+          next[other] = { ...next[other], column: null };
+        }
       }
       return next;
     });
+
+  const setExtra = (target: AttributeTarget, patch: Partial<AttributeSource>) =>
+    setMapping((current) => ({ ...current, [target]: { ...current[target], ...patch } }));
+
+  /** What the first feature carrying anything would end up called. */
+  const previewOf = (target: AttributeTarget): string => {
+    for (const feature of report.features) {
+      const value = readSource(feature.sourceProps, mapping[target]);
+      if (value !== '') return value;
+    }
+    return '';
+  };
 
   return (
     <Modal title="Import boundaries" onClose={onCancel}>
@@ -100,13 +121,17 @@ export function ImportDialog({
           {columns.length > 0 && (
             <div className="mt-2.5 space-y-2">
               {(['client', 'farm', 'field'] as AttributeTarget[]).map((target) => {
-                const chosen = mapping[target] === null ? null : byKey.get(mapping[target]!);
+                const source = mapping[target];
+                const preview = previewOf(target);
+                const over = preview.length > 30;
                 return (
-                  <label key={target} className="grid grid-cols-[64px_1fr] items-center gap-2">
-                    <span className="text-xs font-medium text-ink-100 capitalize">{target}</span>
-                    <span>
+                  <div key={target} className="grid grid-cols-[64px_1fr] items-start gap-2">
+                    <span className="pt-1.5 text-xs font-medium text-ink-100 capitalize">
+                      {target}
+                    </span>
+                    <div>
                       <select
-                        value={mapping[target] ?? ''}
+                        value={source.column ?? ''}
                         aria-label={`${target} column`}
                         onChange={(event) => choose(target, event.target.value || null)}
                         className="w-full rounded-md border border-ink-700 bg-ink-950 px-2 py-1.5
@@ -119,20 +144,62 @@ export function ImportDialog({
                           </option>
                         ))}
                       </select>
-                      {chosen && (
+
+                      {source.column !== null && (
+                        <div className="mt-1.5 flex gap-1.5">
+                          <select
+                            value={source.extra ?? ''}
+                            aria-label={`${target} second column`}
+                            onChange={(event) =>
+                              setExtra(target, { extra: event.target.value || null })
+                            }
+                            className="min-w-0 flex-1 rounded-md border border-ink-800 bg-ink-950
+                              px-2 py-1 text-[11px] text-ink-300 focus:border-crop-500
+                              focus:outline-none"
+                          >
+                            <option value="">— no second column —</option>
+                            {columns
+                              .filter((column) => column.key !== source.column)
+                              .map((column) => (
+                                <option key={column.key} value={column.key}>
+                                  + {column.key}
+                                </option>
+                              ))}
+                          </select>
+                          {source.extra !== null && (
+                            <select
+                              value={source.format}
+                              aria-label={`${target} join format`}
+                              onChange={(event) =>
+                                setExtra(target, { format: event.target.value as JoinFormat })
+                              }
+                              className="shrink-0 rounded-md border border-ink-800 bg-ink-950
+                                px-2 py-1 text-[11px] text-ink-300 focus:border-crop-500
+                                focus:outline-none"
+                            >
+                              {JOIN_FORMATS.map((format) => (
+                                <option key={format.id} value={format.id}>
+                                  {format.example}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+                      )}
+
+                      {preview !== '' && (
                         <span className="mt-1 block truncate text-[10px] text-ink-500">
-                          e.g. “{chosen.sample}”
-                          {chosen.tooLong > 0 && (
+                          e.g. “{preview}”
+                          {over && (
                             <span className="text-amber-400">
                               {' '}
-                              · {chosen.tooLong} value{chosen.tooLong === 1 ? '' : 's'} over 30
-                              characters will be shortened on export
+                              · {preview.length} characters, over the 30-character column
                             </span>
                           )}
                         </span>
                       )}
-                    </span>
-                  </label>
+                    </div>
+                  </div>
                 );
               })}
             </div>
@@ -362,5 +429,68 @@ function Stat({ label, value }: { label: string; value: string }) {
       <dt className="text-[10px] uppercase tracking-wide text-ink-400">{label}</dt>
       <dd className="mt-0.5 text-sm tabular-nums text-ink-100">{value}</dd>
     </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Go to coordinates                                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The fallback for a browser that cannot say where it is. Everything is parsed locally:
+ * a place name would need a geocoding service, and this tool does not call one.
+ */
+export function CoordinatesDialog({
+  onGo,
+  onClose,
+}: {
+  onGo: (position: Position) => void;
+  onClose: () => void;
+}) {
+  const [text, setText] = useState('');
+  const parsed = parseLatLon(text);
+  const invalid = text.trim() !== '' && parsed === null;
+
+  return (
+    <Modal title="Go to coordinates" onClose={onClose} width="max-w-md">
+      <p className="text-xs leading-relaxed text-ink-300">
+        Paste a latitude and longitude, or a link from Google Maps or OpenStreetMap. The
+        map jumps there; nothing is looked up online.
+      </p>
+
+      <input
+        autoFocus
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && parsed) onGo(parsed);
+        }}
+        placeholder="48.8566, 2.3522"
+        spellCheck={false}
+        aria-label="Latitude and longitude"
+        className={`mt-3 w-full rounded-md border bg-ink-950 px-2.5 py-2 text-xs text-ink-100
+          placeholder:text-ink-600 focus:outline-none
+          ${invalid ? 'border-red-700/70 focus:border-red-500' : 'border-ink-700 focus:border-crop-500'}`}
+      />
+
+      <p className="mt-1.5 min-h-4 text-[11px] text-ink-500">
+        {parsed ? (
+          <span className="text-crop-300">Reads as {formatLatLon(parsed)}</span>
+        ) : invalid ? (
+          <span className="text-red-300">
+            Not a position. A place name needs an online lookup, which this tool does not do.
+          </span>
+        ) : (
+          'Also accepts 48°51′23.8″N 2°21′07.9″E, geo: links, and pasted map URLs.'
+        )}
+      </p>
+
+      <div className="mt-4 flex justify-end gap-2">
+        <Button onClick={onClose}>Cancel</Button>
+        <Button tone="primary" disabled={!parsed} onClick={() => parsed && onGo(parsed)}>
+          Go
+        </Button>
+      </div>
+    </Modal>
   );
 }
