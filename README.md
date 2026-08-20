@@ -29,12 +29,18 @@ it, and the position it returns stays in the tab. Don't press the button if you 
 rather your browser not do that. Geolocation also needs a secure context, so it works on
 `https://` and on `localhost`, and nowhere else.
 
-Plenty of desktops cannot answer at all — a machine with no GPS depends on a browser
-location service that is often missing, and the honest answer is a **go to coordinates**
-button beside it. Paste a latitude and longitude, a `geo:` link, or a URL copied from
-Google Maps or OpenStreetMap, and the map goes there. That parsing is local string
-handling, which is why a place *name* is not accepted: looking one up would mean calling
-a geocoding service, and this tool does not call anything.
+Locating can take a while. The browser's permission prompt sits on screen waiting to be
+clicked, and that wait counts against the request, so the button allows thirty seconds
+and shows what it is waiting for rather than giving up early. On a laptop with no GPS the
+answer comes from a network lookup that is slow rather than absent — asking it for high
+accuracy is a good way to turn slow into impossible, so that is only tried when the first
+attempt reports it genuinely cannot place the device.
+
+Where it still cannot, there is a **go to coordinates** button beside it. Paste a latitude
+and longitude, a `geo:` link, or a URL copied from Google Maps or OpenStreetMap, and the
+map goes there. That parsing is local string handling, which is why a place *name* is not
+accepted: looking one up would mean calling a geocoding service, and this tool does not
+call anything.
 
 ## How it works
 

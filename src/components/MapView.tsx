@@ -57,6 +57,17 @@ function locateControl(onClick: () => void): L.Control {
   return control;
 }
 
+/** The browser's own view of whether this site may use geolocation, where it exposes one. */
+async function permissionState(): Promise<PermissionState | null> {
+  try {
+    const status = await navigator.permissions?.query({ name: 'geolocation' as PermissionName });
+    return status?.state ?? null;
+  } catch {
+    // Safari and older browsers do not report on geolocation; the request still works.
+    return null;
+  }
+}
+
 /**
  * Turns a geolocation failure into something worth reading. The browser's own message
  * ("position update is unavailable") tells a user nothing about what to do next.
@@ -68,7 +79,9 @@ function describeLocationError(event: L.ErrorEvent): string {
       return 'Could not get your location: the browser blocked it. Allow location access ' +
         'for this site in the address bar, then try again.';
     case 3:
-      return 'Could not get your location: the request timed out before a position came back.';
+      return 'Could not get your location: the browser did not answer in time. If it asked ' +
+        'for permission, accept the prompt and press the button again — the wait counts ' +
+        'against the request.';
     default:
       return 'Could not get your location: your device could not work out where it is' +
         `${detail}. A desktop without GPS relies on the browser's own location service, ` +
@@ -121,6 +134,8 @@ export interface MapViewProps {
   onGeometryEdited: (featureId: FeatureId, geometry: PolyGeom) => void;
   /** Surfaced when the browser refuses or fails to report a position. */
   onLocationError: (message: string) => void;
+  /** A message while a position is being fetched, or null once it settles. */
+  onLocatingChange: (hint: string | null) => void;
   /** Opens the "go to coordinates" prompt, which lives in the app's dialog layer. */
   onOpenCoordinates: () => void;
   /** A position to centre on, set when the user confirms a coordinate jump. */
@@ -197,39 +212,65 @@ export default function MapView(props: MapViewProps) {
      * coarse attempt fails, the precise one is worth a try: on a phone with no network
      * location, GPS is exactly what does work.
      */
-    const startLocate = (precise: boolean) => {
+    const startLocate = (precise: boolean, hint: string) => {
       locateAttemptRef.current = precise ? 'precise' : 'coarse';
       map.getContainer().classList.add('locating');
+      propsRef.current.onLocatingChange(hint);
       map.locate({
         setView: true,
         maxZoom: 16,
         enableHighAccuracy: precise,
-        timeout: precise ? 20_000 : 8_000,
+        // The clock starts when the call is made, and on a first visit it runs while the
+        // browser's own permission prompt is sitting on screen waiting to be clicked.
+        // Anything short enough to feel responsive gives up before the user has answered.
+        timeout: precise ? 25_000 : 30_000,
         maximumAge: precise ? 0 : 60_000,
       });
     };
 
+    const finishLocate = (message: string | null) => {
+      locateAttemptRef.current = 'idle';
+      map.getContainer().classList.remove('locating');
+      propsRef.current.onLocatingChange(null);
+      if (message) propsRef.current.onLocationError(message);
+    };
+
     locateControl(() => {
-      if (!('geolocation' in navigator)) {
-        propsRef.current.onLocationError(
-          'Could not get your location: this browser does not support geolocation.',
+      void (async () => {
+        if (!('geolocation' in navigator)) {
+          finishLocate('Could not get your location: this browser does not support geolocation.');
+          return;
+        }
+        if (!window.isSecureContext) {
+          finishLocate(
+            'Could not get your location: browsers only allow it over https:// or on localhost.',
+          );
+          return;
+        }
+
+        // Asking the Permissions API first turns a silent 30-second wait into either an
+        // immediate answer or an accurate hint about what the browser is about to do.
+        const state = await permissionState();
+        if (state === 'denied') {
+          finishLocate(
+            'Could not get your location: this site is blocked from using it. Click the icon ' +
+              'at the left of the address bar, set Location to Allow, then try again.',
+          );
+          return;
+        }
+        startLocate(
+          false,
+          state === 'prompt'
+            ? 'Your browser is asking whether to share your location — choose Allow.'
+            : 'Asking your browser where you are…',
         );
-        return;
-      }
-      if (!window.isSecureContext) {
-        propsRef.current.onLocationError(
-          'Could not get your location: browsers only allow it over https:// or on localhost.',
-        );
-        return;
-      }
-      startLocate(false);
+      })();
     }).addTo(map);
 
     coordinateControl(() => propsRef.current.onOpenCoordinates()).addTo(map);
 
     map.on('locationfound', (event: L.LocationEvent) => {
-      locateAttemptRef.current = 'idle';
-      map.getContainer().classList.remove('locating');
+      finishLocate(null);
       locationLayerRef.current?.remove();
       locationLayerRef.current = L.layerGroup([
         L.circle(event.latlng, {
@@ -254,15 +295,14 @@ export default function MapView(props: MapViewProps) {
     });
 
     map.on('locationerror', (event: L.ErrorEvent) => {
-      // A dead network location provider and a missing GPS fail the same way, so the
-      // coarse attempt gets one retry at high accuracy before giving up.
-      if (locateAttemptRef.current === 'coarse' && event.code !== 1) {
-        startLocate(true);
+      // Escalating to high accuracy only helps where there is a GPS the coarse lookup did
+      // not consult. A timeout must NOT escalate: on a laptop with no GPS, asking for high
+      // accuracy is the surest way to turn "slow" into "impossible".
+      if (locateAttemptRef.current === 'coarse' && event.code === 2) {
+        startLocate(true, 'Trying again with a more precise fix…');
         return;
       }
-      locateAttemptRef.current = 'idle';
-      map.getContainer().classList.remove('locating');
-      propsRef.current.onLocationError(describeLocationError(event));
+      finishLocate(describeLocationError(event));
     });
 
     map.pm.setGlobalOptions({ snappable: true, snapDistance: SNAP_DISTANCE });

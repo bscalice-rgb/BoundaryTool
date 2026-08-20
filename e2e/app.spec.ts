@@ -444,6 +444,106 @@ test.describe('zoom to my location', () => {
   });
 });
 
+test('waits for a slow permission prompt instead of timing out', async ({ page }) => {
+  // The case reported from a real laptop: geolocation works, but the answer only comes
+  // after the user has clicked Allow. The clock runs while that prompt is on screen.
+  await page.addInitScript(() => {
+    const calls: boolean[] = [];
+    (window as unknown as { __locateCalls: boolean[] }).__locateCalls = calls;
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: {
+        getCurrentPosition: (
+          ok: (position: unknown) => void,
+          _fail: (error: unknown) => void,
+          options?: { enableHighAccuracy?: boolean; timeout?: number },
+        ) => {
+          calls.push(options?.enableHighAccuracy === true);
+          // Twelve seconds is a realistic delay for someone reading the prompt. The old
+          // eight-second timeout gave up before this, then escalated to high accuracy.
+          if ((options?.timeout ?? 0) < 12_000) return;
+          setTimeout(
+            () =>
+              ok({
+                coords: { latitude: 48.8566, longitude: 2.3522, accuracy: 40 },
+                timestamp: Date.now(),
+              }),
+            12_000,
+          );
+        },
+        watchPosition: () => 0,
+        clearWatch: () => {},
+      },
+    });
+  });
+  await page.goto('/');
+  await importFixtures(page);
+
+  await page.getByRole('button', { name: 'Zoom to my location' }).click();
+  // The wait is visible, so it does not look like the button did nothing.
+  await expect(page.getByRole('status')).toContainText(/location|Asking your browser/);
+
+  await expect(page.locator('.location-dot')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('status')).toBeHidden();
+  // One coarse call, and no escalation to high accuracy.
+  expect(await page.evaluate(() => (window as unknown as { __locateCalls: boolean[] }).__locateCalls))
+    .toEqual([false]);
+});
+
+test('does not escalate to high accuracy when the request merely timed out', async ({ page }) => {
+  await page.addInitScript(() => {
+    const calls: boolean[] = [];
+    (window as unknown as { __locateCalls: boolean[] }).__locateCalls = calls;
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: {
+        getCurrentPosition: (
+          _ok: unknown,
+          fail: (error: unknown) => void,
+          options?: { enableHighAccuracy?: boolean },
+        ) => {
+          calls.push(options?.enableHighAccuracy === true);
+          fail({ code: 3, message: 'Timeout expired' });
+        },
+        watchPosition: () => 0,
+        clearWatch: () => {},
+      },
+    });
+  });
+  await page.goto('/');
+  await importFixtures(page);
+
+  await page.getByRole('button', { name: 'Zoom to my location' }).click();
+  // Asking a GPS-less laptop for high accuracy is how a slow answer becomes no answer.
+  await expect(page.getByText(/did not answer in time/)).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { __locateCalls: boolean[] }).__locateCalls))
+    .toEqual([false]);
+});
+
+test('says how to unblock a site the browser has blocked', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'permissions', {
+      configurable: true,
+      value: { query: async () => ({ state: 'denied' }) },
+    });
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: {
+        getCurrentPosition: () => {
+          throw new Error('should not be called when the permission is already denied');
+        },
+        watchPosition: () => 0,
+        clearWatch: () => {},
+      },
+    });
+  });
+  await page.goto('/');
+  await importFixtures(page);
+
+  await page.getByRole('button', { name: 'Zoom to my location' }).click();
+  await expect(page.getByText(/set Location to Allow/)).toBeVisible();
+});
+
 test('retries at high accuracy when the coarse attempt reports no position', async ({ page }) => {
   // Reproduces the desktop case: the browser's network location service answers
   // POSITION_UNAVAILABLE, but a GPS fix is available when asked for precisely.

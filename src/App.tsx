@@ -88,6 +88,8 @@ export default function App() {
   const [dragActive, setDragActive] = useState(false);
   const [coordinatesOpen, setCoordinatesOpen] = useState(false);
   const [goTo, setGoTo] = useState<{ position: Position; nonce: number } | null>(null);
+  /** Non-null while the browser is being asked for a position. */
+  const [locating, setLocating] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nonceRef = useRef(0);
@@ -710,6 +712,7 @@ export default function App() {
               onSplitLine={handleSplitLine}
               onGeometryEdited={handleGeometryEdited}
               onLocationError={(message) => toast(message, 'error')}
+              onLocatingChange={setLocating}
               onOpenCoordinates={() => setCoordinatesOpen(true)}
               goTo={goTo}
             />
@@ -724,6 +727,19 @@ export default function App() {
                 onApply={applySmoothing}
                 onCancel={() => setTool('select')}
               />
+            )}
+
+            {locating && (
+              <div
+                role="status"
+                className="absolute left-1/2 top-3 z-1000 flex -translate-x-1/2 items-center gap-2
+                  rounded-md border border-ink-600 bg-ink-900/97 px-3 py-2 text-xs text-ink-100
+                  shadow-xl"
+              >
+                <span className="h-3 w-3 animate-spin rounded-full border-2 border-ink-600
+                  border-t-crop-400" />
+                {locating}
+              </div>
             )}
 
             {isEmpty && (
