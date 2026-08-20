@@ -98,7 +98,8 @@ npm run dev        # http://localhost:5173
 npm run build      # static output in dist/
 npm run preview    # serve the built output
 npm test           # unit and integration tests
-npx playwright test  # browser end-to-end tests
+npm run test:e2e   # browser end-to-end tests (builds first, then drives Chromium)
+npm run typecheck  # TypeScript, no emit
 ```
 
 ## Deploying

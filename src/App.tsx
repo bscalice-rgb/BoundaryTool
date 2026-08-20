@@ -37,6 +37,7 @@ import {
   runChecks,
 } from './lib/qa';
 import {
+  type ExportBlockers,
   buildExportZip,
   downloadBlob,
   exportBlockers,
@@ -71,6 +72,8 @@ export default function App() {
   const [pendingImport, setPendingImport] = useState<ImportReport | null>(null);
   const [overlapPair, setOverlapPair] = useState<[WField, WField] | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  /** Export blockers as of the moment the dialog was opened; null while it is closed. */
+  const [exportStatus, setExportStatus] = useState<ExportBlockers | null>(null);
   const [fileName, setFileName] = useState('');
   /** Once the user types their own file name, stop re-suggesting one over the top of it. */
   const [fileNameEdited, setFileNameEdited] = useState(false);
@@ -444,11 +447,15 @@ export default function App() {
   /* ---------------------------------------------------------------- export */
 
   const plan = useMemo(() => planExport(workspace), [workspace]);
-  const exportStatus = useMemo(() => exportBlockers(flags, plan), [flags, plan]);
 
   const openExport = useCallback(() => {
-    // Re-suggested on each open, because the client name it is built from is usually
-    // typed in after the first, blocked, attempt to export.
+    // The QA panel reads deferred flags, which is fine for a live indicator but not for
+    // the gate itself: someone who fills in the last attribute and immediately clicks
+    // export must not be told they are still blocked. So the checks run fresh here,
+    // against the live workspace, and the answer is held for as long as the dialog is up.
+    setExportStatus(exportBlockers(runChecks(workspace), planExport(workspace)));
+    // The suggested name is re-derived on each open, because the client name it is built
+    // from is usually typed in after the first, blocked, attempt to export.
     if (!fileNameEdited) setFileName(suggestFileName(workspace));
     setExportOpen(true);
   }, [workspace, fileNameEdited]);
@@ -720,7 +727,7 @@ export default function App() {
         />
       )}
 
-      {exportOpen && (
+      {exportOpen && exportStatus && (
         <ExportDialog
           plan={plan}
           status={exportStatus}
