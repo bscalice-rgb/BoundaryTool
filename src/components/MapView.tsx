@@ -171,6 +171,10 @@ export default function MapView(props: MapViewProps) {
       } as GeoJSON.Feature) as L.Polygon;
 
       layer.on('click', (event: L.LeafletMouseEvent) => {
+        // While a draw mode is running the click is placing a vertex. Swallowing it here
+        // would make it impossible to draw over an existing polygon, which is exactly what
+        // cutting an exclusion zone out of one requires.
+        if (map.pm.globalDrawModeEnabled()) return;
         L.DomEvent.stopPropagation(event);
         const original = event.originalEvent;
         propsRef.current.onSelect(feature.id, original.shiftKey || original.ctrlKey || original.metaKey);
@@ -208,12 +212,16 @@ export default function MapView(props: MapViewProps) {
     }
 
     // First data to arrive frames itself; later imports leave the view alone so the
-    // map does not jump around while the user is working.
+    // map does not jump around while the user is working. The framing is deliberately
+    // not animated: a user who zooms to a feature a moment later would otherwise have
+    // their view yanked back when this animation lands on top of it.
     if (!didFitRef.current && props.workspace.features.length > 0) {
       didFitRef.current = true;
       const bounds = L.latLngBounds([]);
       for (const layer of layers.values()) bounds.extend(layer.getBounds());
-      if (bounds.isValid()) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 17 });
+      if (bounds.isValid()) {
+        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 17, animate: false });
+      }
     }
     if (props.workspace.features.length === 0) didFitRef.current = false;
   }, [props.workspace, props.selection, props.colorFor]);
@@ -233,7 +241,6 @@ export default function MapView(props: MapViewProps) {
         snapDistance: SNAP_DISTANCE,
         continueDrawing: false,
         finishOn: 'dblclick',
-        finishOnEnter: true,
         allowSelfIntersection: false,
         templineStyle: { color: '#facc15' },
         hintlineStyle: { color: '#facc15', dashArray: '4,4' },
@@ -248,7 +255,6 @@ export default function MapView(props: MapViewProps) {
         snapDistance: SNAP_DISTANCE,
         continueDrawing: false,
         finishOn: 'dblclick',
-        finishOnEnter: true,
         templineStyle: { color: '#f87171' },
         hintlineStyle: { color: '#f87171', dashArray: '4,4' },
       });

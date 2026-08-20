@@ -47,7 +47,7 @@ export const TOOLS: ToolSpec[] = [
     id: 'draw',
     label: 'Draw',
     shortcut: 'D',
-    hint: 'Click to place each vertex. Double-click, press Enter, or click the first vertex again to close the polygon.',
+    hint: 'Click to place each vertex, then double-click or click the first vertex again to close the polygon.',
     icon: <path d="M2 8l4-5 8 2-2 8-8 1z" />,
   },
   {
@@ -69,7 +69,7 @@ export const TOOLS: ToolSpec[] = [
     id: 'split',
     label: 'Split',
     shortcut: 'S',
-    hint: 'Draw a line across the selected polygon to cut it in two. Double-click or press Enter to finish the line.',
+    hint: 'Draw a line across the selected polygon to cut it in two. Double-click to finish the line.',
     needsSelection: true,
     icon: (
       <>
@@ -98,12 +98,6 @@ export interface ToolbarProps {
   onSnappingChange: (value: boolean) => void;
   basemap: Basemap;
   onBasemapChange: (value: Basemap) => void;
-  canUndo: boolean;
-  canRedo: boolean;
-  undoLabel: string | null;
-  redoLabel: string | null;
-  onUndo: () => void;
-  onRedo: () => void;
   onDeleteSelection: () => void;
   onMergeSelection: () => void;
 }
@@ -113,7 +107,10 @@ export default function Toolbar(props: ToolbarProps) {
 
   return (
     <div className="flex shrink-0 flex-col border-b border-ink-800 bg-ink-900">
-      <div className="flex flex-wrap items-center gap-1 px-2 py-1.5">
+      <div className="flex items-center gap-2 px-2 py-1.5">
+        {/* The tools wrap among themselves; the basemap switch never pushes them to
+            a second row, which is what happens if it shares one wrapping container. */}
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
         {TOOLS.map((spec) => {
           const disabled = spec.needsSelection && !props.hasSelection;
           return (
@@ -154,23 +151,61 @@ export default function Toolbar(props: ToolbarProps) {
           onClick={props.onMergeSelection}
           disabled={props.selectionCount < 2}
           title="Merge the selected polygons into one (they should be adjacent or overlapping)"
+          className="px-2"
         >
-          Merge
+          <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+            <path d="M2 3h7v7H2zM7 6h7v7H7z" strokeLinejoin="round" />
+          </svg>
+          <span className="sr-only">Merge selected polygons</span>
         </Button>
         <Button
           tone="danger"
           onClick={props.onDeleteSelection}
           disabled={!props.hasSelection}
           title="Delete the selected polygons (Del)"
+          className="px-2"
         >
-          Delete
+          <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+            <path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.5 6.5v5M9.5 6.5v5" strokeLinejoin="round" />
+          </svg>
+          <span className="sr-only">Delete selected polygons</span>
         </Button>
+        </div>
 
-        <Divider />
+        <div className="flex shrink-0 overflow-hidden rounded-md border border-ink-700">
+          {(['imagery', 'street'] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => props.onBasemapChange(option)}
+              title={
+                option === 'imagery'
+                  ? 'Esri World Imagery — the layer to trace boundaries against'
+                  : 'OpenStreetMap — roads and place names for context'
+              }
+              className={`px-2.5 py-1.5 text-xs transition-colors ${
+                props.basemap === option
+                  ? 'bg-ink-700 text-ink-100'
+                  : 'bg-ink-850 text-ink-400 hover:text-ink-100'
+              }`}
+            >
+              {option === 'imagery' ? 'Imagery' : 'Street'}
+            </button>
+          ))}
+        </div>
+      </div>
 
+      <div className="flex items-center gap-3 border-t border-ink-850 bg-ink-950/60 px-3 py-1">
+        <span className="min-w-0 flex-1 truncate text-[11px] text-ink-400">
+          {active ? active.hint : ''}
+        </span>
+        {active && <InfoDot text={active.hint} label={active.label} />}
+
+        {/* Snapping lives with the readouts rather than the actions: it is a mode that
+            stays on across tools, not something you do once. */}
         <label
-          className="flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-xs
-            text-ink-300 hover:bg-ink-800"
+          className="flex shrink-0 cursor-pointer items-center gap-1.5 text-[11px] text-ink-400
+            hover:text-ink-100"
           title="Snap vertices to nearby boundaries while drawing and editing, so neighbouring fields meet exactly"
         >
           <input
@@ -179,44 +214,10 @@ export default function Toolbar(props: ToolbarProps) {
             onChange={(event) => props.onSnappingChange(event.target.checked)}
             className="h-3 w-3 accent-crop-500"
           />
-          Snap
+          Snapping
         </label>
 
-        <Divider />
-
-        <Button onClick={props.onUndo} disabled={!props.canUndo} title={undoTitle(props.undoLabel)}>
-          Undo
-        </Button>
-        <Button onClick={props.onRedo} disabled={!props.canRedo} title={redoTitle(props.redoLabel)}>
-          Redo
-        </Button>
-
-        <div className="ml-auto flex items-center gap-1">
-          <div className="flex overflow-hidden rounded-md border border-ink-700">
-            {(['imagery', 'street'] as const).map((option) => (
-              <button
-                key={option}
-                type="button"
-                onClick={() => props.onBasemapChange(option)}
-                className={`px-2.5 py-1.5 text-xs transition-colors ${
-                  props.basemap === option
-                    ? 'bg-ink-700 text-ink-100'
-                    : 'bg-ink-850 text-ink-400 hover:text-ink-100'
-                }`}
-              >
-                {option === 'imagery' ? 'Imagery' : 'Street'}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2 border-t border-ink-850 bg-ink-950/60 px-3 py-1">
-        <span className="min-w-0 truncate text-[11px] text-ink-400">
-          {active ? active.hint : ''}
-        </span>
-        {active && <InfoDot text={active.hint} label={active.label} />}
-        <span className="ml-auto shrink-0 text-[11px] tabular-nums text-ink-300">
+        <span className="shrink-0 text-[11px] tabular-nums text-ink-300">
           {props.selectionCount > 0
             ? `${props.selectionCount} selected · ${props.selectionAreaHa.toFixed(2)} ha`
             : 'Nothing selected'}
@@ -227,6 +228,57 @@ export default function Toolbar(props: ToolbarProps) {
 }
 
 const Divider = () => <span className="mx-0.5 h-5 w-px shrink-0 bg-ink-800" />;
+
+/** Curved undo arrow, mirrored for redo. */
+const HistoryArrow = ({ forward = false }: { forward?: boolean }) => (
+  <svg
+    viewBox="0 0 16 16"
+    className={`h-3.5 w-3.5 ${forward ? '-scale-x-100' : ''}`}
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M2.5 6.5h7a3.5 3.5 0 010 7H6" />
+    <path d="M5.5 3.5L2.5 6.5l3 3" />
+  </svg>
+);
+
+/**
+ * Undo and redo sit in the app header rather than the map toolbar, because they cover
+ * grouping and attribute edits as much as they cover geometry. Each button names the
+ * action it would reverse, so the history stays legible without a separate panel.
+ */
+export function HistoryButtons({
+  canUndo,
+  canRedo,
+  undoLabel,
+  redoLabel,
+  onUndo,
+  onRedo,
+}: {
+  canUndo: boolean;
+  canRedo: boolean;
+  undoLabel: string | null;
+  redoLabel: string | null;
+  onUndo: () => void;
+  onRedo: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      <Button onClick={onUndo} disabled={!canUndo} title={undoTitle(undoLabel)} className="px-2">
+        <HistoryArrow />
+        <span className="sr-only">Undo</span>
+      </Button>
+      <Button onClick={onRedo} disabled={!canRedo} title={redoTitle(redoLabel)} className="px-2">
+        <HistoryArrow forward />
+        <span className="sr-only">Redo</span>
+      </Button>
+    </div>
+  );
+}
 
 const undoTitle = (label: string | null) =>
   label ? `Undo: ${label} (Ctrl+Z)` : 'Nothing to undo (Ctrl+Z)';

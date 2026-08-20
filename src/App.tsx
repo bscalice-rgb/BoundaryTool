@@ -45,7 +45,7 @@ import {
 } from './lib/export';
 import { UNGROUPED_COLOR, fieldColor } from './lib/colors';
 import MapView, { type FocusRequest } from './components/MapView';
-import Toolbar, { SmoothingPanel } from './components/Toolbar';
+import Toolbar, { HistoryButtons, SmoothingPanel } from './components/Toolbar';
 import LeftPanel, { type AttributeFocus } from './components/LeftPanel';
 import QAPanel from './components/QAPanel';
 import EmptyState from './components/EmptyState';
@@ -233,41 +233,43 @@ export default function App() {
 
   const handleCutHole = useCallback(
     (hole: Polygon) => {
-      apply('Cut exclusion zone', (current) => cutExclusionZone(current, hole, selection));
+      const next = cutExclusionZone(workspace, hole, selection);
+      if (next === workspace) {
+        toast('That shape does not overlap any polygon, so nothing was cut.', 'error');
+        return;
+      }
+      apply('Cut exclusion zone', () => next);
     },
-    [apply, selection],
+    [apply, workspace, selection, toast],
   );
 
   const handleSplitLine = useCallback(
     (line: LineString) => {
-      const targets = selectedFeatures;
-      if (targets.length === 0) {
+      if (selectedFeatures.length === 0) {
         toast('Select the polygon to split first.', 'error');
         return;
       }
+      // The split is worked out here rather than inside the history action, because the
+      // action runs on the next render and the result is needed now, for the message.
+      let next = workspace;
       let splitCount = 0;
-      apply('Split polygon', (current) => {
-        let next = current;
-        for (const target of targets) {
-          const live = next.features.find((f) => f.id === target.id);
-          if (!live) continue;
-          const parts = splitByLine(live.geometry, line);
-          if (!parts || parts.length < 2) continue;
-          next = replaceWithParts(next, live.id, parts);
-          splitCount += 1;
-        }
-        return next;
-      });
+      for (const target of selectedFeatures) {
+        const parts = splitByLine(target.geometry, line);
+        if (!parts || parts.length < 2) continue;
+        next = replaceWithParts(next, target.id, parts);
+        splitCount += 1;
+      }
+
+      if (splitCount === 0) {
+        toast('The line did not cut cleanly through the selected polygon.', 'error');
+        return;
+      }
+      apply(`Split ${splitCount} polygon${splitCount === 1 ? '' : 's'}`, () => next);
       setSelection(new Set());
       setTool('select');
-      toast(
-        splitCount > 0
-          ? `Split ${splitCount} polygon${splitCount === 1 ? '' : 's'}.`
-          : 'The line did not cut cleanly through the selected polygon.',
-        splitCount > 0 ? 'info' : 'error',
-      );
+      toast(`Split ${splitCount} polygon${splitCount === 1 ? '' : 's'}.`);
     },
-    [apply, selectedFeatures, toast],
+    [apply, workspace, selectedFeatures, toast],
   );
 
   const handleGeometryEdited = useCallback(
@@ -549,6 +551,14 @@ export default function App() {
 
         <div className="ml-auto flex items-center gap-1.5">
           {busy && <span className="text-[11px] text-ink-400">Reading files…</span>}
+          <HistoryButtons
+            canUndo={history.canUndo}
+            canRedo={history.canRedo}
+            undoLabel={history.undoLabel}
+            redoLabel={history.redoLabel}
+            onUndo={history.undo}
+            onRedo={history.redo}
+          />
           <input
             ref={fileInputRef}
             type="file"
@@ -590,7 +600,7 @@ export default function App() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <aside className="w-[400px] shrink-0">
+        <aside className="w-[440px] shrink-0">
           <LeftPanel
             workspace={workspace}
             selection={selection}
@@ -631,12 +641,6 @@ export default function App() {
             onSnappingChange={setSnapping}
             basemap={basemap}
             onBasemapChange={setBasemap}
-            canUndo={history.canUndo}
-            canRedo={history.canRedo}
-            undoLabel={history.undoLabel}
-            redoLabel={history.redoLabel}
-            onUndo={history.undo}
-            onRedo={history.redo}
             onDeleteSelection={deleteSelection}
             onMergeSelection={mergeSelection}
           />
@@ -687,7 +691,7 @@ export default function App() {
           </div>
         </main>
 
-        <aside className="w-[340px] shrink-0">
+        <aside className="w-[330px] shrink-0">
           <QAPanel
             flags={flags}
             activeFlagId={activeFlagId}

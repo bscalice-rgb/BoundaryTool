@@ -88,15 +88,25 @@ export default function LeftPanel(props: LeftPanelProps) {
         )}
 
         {fields.length > 0 && (
-          <table className="w-full border-collapse text-xs">
+          <table className="w-full table-fixed border-collapse text-xs">
+            {/* Fixed widths so a long farm name cannot squeeze the field name, which is
+                the column people actually read the table by. */}
+            <colgroup>
+              <col className="w-7" />
+              <col className="w-[22%]" />
+              <col className="w-[20%]" />
+              <col />
+              <col className="w-14" />
+              <col className="w-16" />
+            </colgroup>
             <thead className="sticky top-0 z-10 bg-ink-850">
               <tr className="text-[10px] uppercase tracking-wide text-ink-400">
-                <th className="w-6 border-b border-ink-800 py-1.5" />
+                <th className="border-b border-ink-800 py-1.5" />
                 <th className="border-b border-ink-800 px-1 py-1.5 text-left font-semibold">Client</th>
                 <th className="border-b border-ink-800 px-1 py-1.5 text-left font-semibold">Farm</th>
                 <th className="border-b border-ink-800 px-1 py-1.5 text-left font-semibold">Field</th>
                 <th className="border-b border-ink-800 px-1.5 py-1.5 text-right font-semibold">ha</th>
-                <th className="w-14 border-b border-ink-800 py-1.5" />
+                <th className="border-b border-ink-800 py-1.5" />
               </tr>
             </thead>
             <tbody>

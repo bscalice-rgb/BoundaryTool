@@ -54,6 +54,8 @@ async function importFixtures(page: Page): Promise<void> {
   }
   await page.getByRole('button', { name: 'Add to workspace' }).click();
   await expect(dialog).toBeHidden();
+  // The map frames the new data before anything else can act on the view.
+  await expect(page.locator('.leaflet-control-scale-line').first()).toHaveText('50 km');
 }
 
 /* -------------------------------------------------------------------------- */
@@ -210,6 +212,71 @@ test('draws a polygon and undoes it with the keyboard', async ({ page }) => {
 
   await page.keyboard.press('Control+Shift+z');
   await expect(page.locator('text=/5 polygons? not assigned/')).toBeVisible();
+});
+
+/**
+ * Selects the first ungrouped polygon and fills the map with it, so the drawing tests
+ * can aim at the middle of the viewport and be sure of hitting it.
+ */
+async function focusFirstPolygon(page: Page) {
+  await page
+    .locator('section', { hasText: 'Ungrouped polygons' })
+    .locator('button', { hasText: 'blocks.kmz' })
+    .first()
+    .click();
+  await expect(page.getByText('1 polygon selected')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Zoom to selection' }).click();
+  // The scale bar reads in kilometres until the map has actually zoomed in.
+  await expect(page.locator('.leaflet-control-scale-line').first()).toHaveText(/\bm$/);
+
+  return (await page.locator('.leaflet-container').boundingBox())!;
+}
+
+test('splits a polygon in two with a drawn line', async ({ page }) => {
+  await page.goto('/');
+  await importFixtures(page);
+  const box = await focusFirstPolygon(page);
+
+  await page.getByRole('button', { name: /^Split/ }).click();
+  const midY = box.y + box.height / 2;
+  await page.mouse.click(box.x + 40, midY);
+  await page.mouse.dblclick(box.x + box.width - 40, midY);
+
+  await expect(page.locator('text=/5 polygons? not assigned/')).toBeVisible();
+
+  await page.keyboard.press('Control+z');
+  await expect(page.locator('text=/4 polygons? not assigned/')).toBeVisible();
+});
+
+test('cuts an exclusion zone and the area drops', async ({ page }) => {
+  await page.goto('/');
+  await importFixtures(page);
+  const box = await focusFirstPolygon(page);
+
+  const areaLabel = page.locator('section', { hasText: 'Ungrouped polygons' })
+    .locator('text=/ha$/')
+    .first();
+  const before = Number((await areaLabel.innerText()).replace(' ha', ''));
+  expect(before).toBeGreaterThan(0);
+
+  await page.getByRole('button', { name: 'Cut hole' }).click();
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await page.mouse.click(cx - 60, cy - 60);
+  await page.mouse.click(cx + 60, cy - 60);
+  await page.mouse.click(cx + 60, cy + 60);
+  await page.mouse.dblclick(cx - 60, cy + 60);
+
+  await expect
+    .poll(async () => Number((await areaLabel.innerText()).replace(' ha', '')))
+    .toBeLessThan(before);
+
+  // The hole is undoable like everything else.
+  await page.keyboard.press('Control+z');
+  await expect
+    .poll(async () => Number((await areaLabel.innerText()).replace(' ha', '')))
+    .toBe(before);
 });
 
 test('keeps nothing across a reload and contacts only basemap hosts', async ({ page }) => {
