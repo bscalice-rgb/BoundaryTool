@@ -184,6 +184,66 @@ describe('round trip through a shapefile reader', () => {
   });
 });
 
+describe('record structure read straight from the bytes', () => {
+  /** Decodes one polygon record without going through a shapefile library. */
+  function readRecord(shpBytes: Uint8Array, recordIndex: number) {
+    const view = new DataView(shpBytes.buffer, shpBytes.byteOffset, shpBytes.byteLength);
+    let offset = 100;
+    for (let i = 0; i < recordIndex; i++) {
+      offset += 8 + view.getInt32(offset + 4, false) * 2;
+    }
+    let p = offset + 8;
+    const shapeType = view.getInt32(p, true);
+    p += 4;
+    const bbox = [0, 1, 2, 3].map((i) => view.getFloat64(p + i * 8, true));
+    p += 32;
+    const numParts = view.getInt32(p, true);
+    p += 4;
+    const numPoints = view.getInt32(p, true);
+    p += 4;
+    const parts: number[] = [];
+    for (let i = 0; i < numParts; i++) {
+      parts.push(view.getInt32(p, true));
+      p += 4;
+    }
+    const points: [number, number][] = [];
+    for (let i = 0; i < numPoints; i++) {
+      points.push([view.getFloat64(p, true), view.getFloat64(p + 8, true)]);
+      p += 16;
+    }
+    const bounds = [...parts, numPoints];
+    const rings = bounds.slice(0, -1).map((start, i) => points.slice(start, bounds[i + 1]));
+    return { shapeType, bbox, parts, numPoints, rings };
+  }
+
+  it('writes each ring as its own part, outer clockwise and holes counter-clockwise', () => {
+    const geometry: MultiPolygon = {
+      type: 'MultiPolygon',
+      coordinates: [squareWithHole(1, 51).coordinates, square(2, 52).coordinates],
+    };
+    const { shp: shpBytes } = writeShpShx([geometry]);
+    const record = readRecord(shpBytes, 0);
+
+    expect(record.shapeType).toBe(5);
+    // Two outer rings and one hole, in source order, each starting where the last ended.
+    expect(record.parts).toEqual([0, 5, 10]);
+    expect(record.numPoints).toBe(15);
+    expect(record.rings.map((ring) => Math.sign(signedArea(ring)))).toEqual([-1, 1, -1]);
+  });
+
+  it('closes every ring and states a bounding box that contains them', () => {
+    const { shp: shpBytes } = writeShpShx([squareWithHole(1, 51)]);
+    const record = readRecord(shpBytes, 0);
+
+    for (const ring of record.rings) {
+      expect(ring[0]).toEqual(ring[ring.length - 1]);
+    }
+    const xs = record.rings.flat().map((point) => point[0]);
+    const ys = record.rings.flat().map((point) => point[1]);
+    expect(record.bbox).toEqual([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]);
+  });
+});
+
 describe('prj', () => {
   it('is well-formed WGS84 WKT', () => {
     expect(WGS84_WKT).toContain('GEOGCS');

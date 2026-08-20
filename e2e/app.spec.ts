@@ -279,6 +279,48 @@ test('cuts an exclusion zone and the area drops', async ({ page }) => {
     .toBe(before);
 });
 
+test('resolves an overlap between two fields and undoes the clip', async ({ page }) => {
+  await page.goto('/');
+  await importFixtures(page);
+  const box = await focusFirstPolygon(page);
+
+  // Make that polygon a field of its own.
+  await page.getByRole('button', { name: 'Combine into one field' }).click();
+  await attributeCell(page, 'client').first().fill('Acme');
+  await attributeCell(page, 'farm').first().fill('Home');
+  await attributeCell(page, 'field').first().fill('West');
+
+  // Draw a second polygon overlapping it, and make that a field too.
+  await page.getByRole('button', { name: /^Draw/ }).click();
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await page.mouse.click(cx, cy - 80);
+  await page.mouse.click(cx + 200, cy - 80);
+  await page.mouse.click(cx + 200, cy + 80);
+  await page.mouse.dblclick(cx, cy + 80);
+
+  await page.getByRole('button', { name: 'Select all' }).click();
+  await page.getByRole('button', { name: 'Combine into one field' }).click();
+  await attributeCell(page, 'client').nth(1).fill('Acme');
+  await attributeCell(page, 'farm').nth(1).fill('Home');
+  await attributeCell(page, 'field').nth(1).fill('East');
+
+  const overlapFlag = page.locator('article', { hasText: 'overlaps' });
+  await expect(overlapFlag).toBeVisible();
+
+  await overlapFlag.getByRole('button', { name: 'Auto-fix' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Resolve overlap' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Clip the overlap' }).click();
+
+  await expect(overlapFlag).toBeHidden();
+  await expect(page.getByText('0 blocking')).toBeVisible();
+
+  // Auto-fixes are ordinary history entries, so one undo puts the overlap back.
+  await page.keyboard.press('Control+z');
+  await expect(page.locator('article', { hasText: 'overlaps' })).toBeVisible();
+});
+
 test('keeps nothing across a reload and contacts only basemap hosts', async ({ page }) => {
   await page.goto('/');
   await importFixtures(page);
