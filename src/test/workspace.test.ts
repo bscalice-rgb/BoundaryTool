@@ -8,6 +8,7 @@ import {
   addImported,
   assignToField,
   combineIntoField,
+  cutExclusionZone,
   deleteField,
   mergeFeatures,
   newFeature,
@@ -23,8 +24,8 @@ import {
   planExport,
   suggestFileName,
 } from '../lib/export';
-import { runChecks } from '../lib/qa';
-import { areaHa, differenceGeom, splitByLine } from '../lib/geo';
+import { fieldGeometries, runChecks } from '../lib/qa';
+import { areaHa, splitByLine } from '../lib/geo';
 import { importFiles } from '../lib/import';
 import { KML_DOC, fileFrom, poly, squareRing, utmShapefileZip, kmzFile } from './fixtures';
 
@@ -116,7 +117,7 @@ describe('field grouping', () => {
     expect(removed.features).toHaveLength(0);
   });
 
-  it('seeds a new field from the attributes the source file carried', async () => {
+  it('leaves a new field blank when the user declined to carry attributes across', async () => {
     const report = await importFiles([fileFrom('fields.kml', KML_DOC)]);
     let workspace = addImported(emptyWorkspace(), report.features, {
       client: false,
@@ -125,7 +126,28 @@ describe('field grouping', () => {
     });
     const church = workspace.features.find((f) => f.sourceProps.name === 'Church Field')!;
     workspace = combineIntoField(workspace, [church.id]);
-    expect(workspace.fields[0]).toMatchObject({
+    // Declining at import means declining later too, however tempting the source data.
+    expect(workspace.fields[0]).toMatchObject({ client: '', farm: '', field: '' });
+  });
+
+  it('restores the carried-over names when a field is ungrouped and rebuilt', async () => {
+    const report = await importFiles([fileFrom('fields.kml', KML_DOC)]);
+    let workspace = addImported(emptyWorkspace(), report.features, {
+      client: true,
+      farm: true,
+      field: true,
+    });
+    const church = workspace.features.find((f) => f.sourceProps.name === 'Church Field')!;
+    const original = workspace.fields.find((f) => f.id === church.fieldId)!;
+    expect(original).toMatchObject({
+      client: 'Bell Farms',
+      farm: 'Manor',
+      field: 'Church Field',
+    });
+
+    workspace = ungroupField(workspace, original.id);
+    workspace = combineIntoField(workspace, [church.id]);
+    expect(workspace.fields.at(-1)).toMatchObject({
       client: 'Bell Farms',
       farm: 'Manor',
       field: 'Church Field',
@@ -163,15 +185,75 @@ describe('attribute mapping on import', () => {
 /* -------------------------------------------------------------------------- */
 
 describe('editing tools', () => {
-  it('cuts a hole and reduces the area by the hole', () => {
-    const field = square(2.5, 48.8, 0.004);
-    const hole = square(2.501, 48.801, 0.001);
-    const before = areaHa(field);
-    const after = differenceGeom(field, hole)!;
+  it('cuts a tree island out of a field and the area drops by the hole', () => {
+    let workspace: Workspace = {
+      fields: [],
+      features: [newFeature(square(2.5, 48.8, 0.004), 'a.kml')],
+    };
+    workspace = combineIntoField(workspace, [workspace.features[0].id]);
+    const before = areaHa(workspace.features[0].geometry);
 
-    expect(after.type).toBe('Polygon');
-    expect((after as GeoJSON.Polygon).coordinates).toHaveLength(2); // outer plus hole
-    expect(areaHa(after)).toBeCloseTo(before - areaHa(hole), 4);
+    const island = square(2.501, 48.801, 0.001);
+    workspace = cutExclusionZone(workspace, island);
+
+    const cut = workspace.features[0].geometry;
+    expect(cut.type).toBe('Polygon');
+    expect((cut as GeoJSON.Polygon).coordinates).toHaveLength(2); // outer ring plus hole
+    expect(areaHa(cut)).toBeCloseTo(before - areaHa(island), 4);
+    // The polygon stays in its field, so the field's area updates with it.
+    expect(workspace.features[0].fieldId).toBe(workspace.fields[0].id);
+    expect(fieldGeometries(workspace)[0].areaHa).toBeCloseTo(areaHa(cut), 6);
+  });
+
+  it('cuts every polygon a track crosses when nothing is selected', () => {
+    const workspace: Workspace = {
+      fields: [],
+      features: [
+        newFeature(square(2.5, 48.8, 0.003), 'a'),
+        newFeature(square(2.503, 48.8, 0.003), 'a'),
+      ],
+    };
+    // A north-south strip straddling the boundary between the two blocks.
+    const track = poly([
+      [
+        [2.5028, 48.799],
+        [2.5032, 48.799],
+        [2.5032, 48.804],
+        [2.5028, 48.804],
+        [2.5028, 48.799],
+      ],
+    ]);
+    const cut = cutExclusionZone(workspace, track);
+
+    expect(cut.features).toHaveLength(2);
+    for (const [index, feature] of cut.features.entries()) {
+      expect(areaHa(feature.geometry)).toBeLessThan(areaHa(workspace.features[index].geometry));
+    }
+  });
+
+  it('confines the cut to the selection when there is one', () => {
+    const workspace: Workspace = {
+      fields: [],
+      features: [
+        newFeature(square(2.5, 48.8, 0.003), 'a'),
+        newFeature(square(2.5, 48.8, 0.003), 'b'),
+      ],
+    };
+    const cut = cutExclusionZone(
+      workspace,
+      square(2.5005, 48.8005, 0.001),
+      new Set([workspace.features[0].id]),
+    );
+    expect(areaHa(cut.features[0].geometry)).toBeLessThan(areaHa(workspace.features[0].geometry));
+    expect(cut.features[1].geometry).toBe(workspace.features[1].geometry);
+  });
+
+  it('deletes a polygon the exclusion zone swallows whole', () => {
+    const workspace: Workspace = {
+      fields: [],
+      features: [newFeature(square(2.5, 48.8, 0.001), 'a')],
+    };
+    expect(cutExclusionZone(workspace, square(2.49, 48.79, 0.05)).features).toHaveLength(0);
   });
 
   it('splits a polygon into two parts with a drawn line', () => {
@@ -256,7 +338,7 @@ describe('undo and redo', () => {
     state = __historyReducer(state, { type: 'undo' });
     state = __historyReducer(state, { type: 'redo' });
     expect(state.present.features).toHaveLength(1);
-    expect(state.canRedo ?? state.future.length).toBe(0);
+    expect(state.future).toHaveLength(0);
   });
 
   it('reverses an auto-fix', () => {

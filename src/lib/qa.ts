@@ -5,6 +5,7 @@ import type {
   FlagKind,
   PolyGeom,
   QAFlag,
+  WFeature,
   WField,
   Workspace,
 } from '../types';
@@ -105,11 +106,41 @@ export interface FieldGeometry {
   areaHa: number;
 }
 
+/**
+ * Cache of dissolved field geometry, keyed by field id.
+ *
+ * Dissolving is the expensive part of every QA pass, and it re-runs on each keystroke
+ * in the attribute table where no geometry has moved at all. Member geometries are
+ * immutable, so an entry stays valid as long as the same geometry objects are still
+ * the field's members.
+ */
+const dissolveCache = new Map<FieldId, { members: PolyGeom[]; geometry: PolyGeom | null }>();
+
+function sameMembers(a: PolyGeom[], b: PolyGeom[]): boolean {
+  return a.length === b.length && a.every((geometry, index) => geometry === b[index]);
+}
+
 /** Merges each field's member features the same way the export does. */
 export function fieldGeometries(workspace: Workspace): FieldGeometry[] {
-  return workspace.fields.map((field) => {
-    const members = workspace.features.filter((f) => f.fieldId === field.id);
-    const geometry = unionAll(members.map((f) => f.geometry));
+  const membersByField = new Map<FieldId, WFeature[]>();
+  for (const field of workspace.fields) membersByField.set(field.id, []);
+  for (const feature of workspace.features) {
+    if (feature.fieldId) membersByField.get(feature.fieldId)?.push(feature);
+  }
+
+  const live = new Set<FieldId>();
+  const result = workspace.fields.map((field) => {
+    live.add(field.id);
+    const members = membersByField.get(field.id) ?? [];
+    const geometries = members.map((f) => f.geometry);
+
+    const cached = dissolveCache.get(field.id);
+    const geometry =
+      cached && sameMembers(cached.members, geometries)
+        ? cached.geometry
+        : unionAll(geometries);
+    dissolveCache.set(field.id, { members: geometries, geometry });
+
     return {
       field,
       featureIds: members.map((f) => f.id),
@@ -118,6 +149,11 @@ export function fieldGeometries(workspace: Workspace): FieldGeometry[] {
       areaHa: geometry ? areaHa(geometry) : 0,
     };
   });
+
+  for (const id of dissolveCache.keys()) {
+    if (!live.has(id)) dissolveCache.delete(id);
+  }
+  return result;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -137,6 +173,7 @@ export function runChecks(
 ): QAFlag[] {
   const flags: QAFlag[] = [];
   const fields = fieldGeometries(workspace);
+  const labels = featureLabels(workspace);
 
   /* -- Attributes and field membership ------------------------------------ */
 
@@ -216,7 +253,7 @@ export function runChecks(
   /* -- Per-feature geometry ------------------------------------------------ */
 
   for (const feature of workspace.features) {
-    const label = describeFeature(workspace, feature.id);
+    const label = labels.get(feature.id) ?? 'Polygon';
     const validity = checkValidity(feature.geometry);
     if (!validity.ok) {
       flags.push({
@@ -338,7 +375,20 @@ function suggestedTolerance(spacingM: number): number {
  *
  * Returns null when the shape is too small for the test to say anything useful.
  */
+const protrusionCache = new WeakMap<object, Map<number, number | null>>();
+
 export function protrusionShare(geometry: PolyGeom, widthM: number): number | null {
+  // Two buffer operations per feature per pass is too much to repeat while someone is
+  // typing in the attribute table, and the geometry object is a safe cache key.
+  const byWidth = protrusionCache.get(geometry) ?? new Map<number, number | null>();
+  if (byWidth.has(widthM)) return byWidth.get(widthM) ?? null;
+  const result = computeProtrusionShare(geometry, widthM);
+  byWidth.set(widthM, result);
+  protrusionCache.set(geometry, byWidth);
+  return result;
+}
+
+function computeProtrusionShare(geometry: PolyGeom, widthM: number): number | null {
   const total = areaM2(geometry);
   if (total < 5_000) return null; // below 0.5 ha the measure is dominated by shape noise
   try {
@@ -386,13 +436,28 @@ export function describeField(field: WField): string {
   return name || farm || field.client.trim() || 'Untitled field';
 }
 
+/**
+ * Labels every feature as "source file #n", prefixed with its field where it has one.
+ * Built in a single pass because the per-feature alternative rescans the whole feature
+ * list for each label.
+ */
+export function featureLabels(workspace: Workspace): Map<string, string> {
+  const fieldsById = new Map(workspace.fields.map((field) => [field.id, field]));
+  const counters = new Map<string, number>();
+  const labels = new Map<string, string>();
+
+  for (const feature of workspace.features) {
+    const n = (counters.get(feature.source) ?? 0) + 1;
+    counters.set(feature.source, n);
+    const base = `${feature.source} #${n}`;
+    const field = feature.fieldId ? fieldsById.get(feature.fieldId) : undefined;
+    labels.set(feature.id, field ? `${describeField(field)} · ${base}` : base);
+  }
+  return labels;
+}
+
 export function describeFeature(workspace: Workspace, featureId: string): string {
-  const feature = workspace.features.find((f) => f.id === featureId);
-  if (!feature) return 'Polygon';
-  const field = workspace.fields.find((f) => f.id === feature.fieldId);
-  const index = workspace.features.filter((f) => f.source === feature.source).indexOf(feature);
-  const base = `${feature.source} #${index + 1}`;
-  return field ? `${describeField(field)} · ${base}` : base;
+  return featureLabels(workspace).get(featureId) ?? 'Polygon';
 }
 
 /* -------------------------------------------------------------------------- */

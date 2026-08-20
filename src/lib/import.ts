@@ -165,7 +165,7 @@ async function importZip(file: File, report: ImportReport): Promise<void> {
   if (hasShp) {
     const result = await shp(buffer);
     const collections = Array.isArray(result) ? result : [result];
-    reportShapefileCrs(entries, file.name, report);
+    await reportShapefileCrs(entries, file.name, report);
     for (const collection of collections) {
       // Only name the inner layer when the archive actually holds more than one,
       // so the common single-layer case reads as just the file the user dropped.
@@ -190,17 +190,28 @@ async function importZip(file: File, report: ImportReport): Promise<void> {
   }
 }
 
-/** Notes which CRS a zipped shapefile declared, since shpjs reprojects it silently. */
-function reportShapefileCrs(
+/**
+ * Notes which CRS a zipped shapefile declared. shpjs reprojects to WGS84 while reading
+ * and says nothing about it, so this is the only place the user finds out their UTM file
+ * was converted — or that it had no .prj and was taken at face value.
+ */
+async function reportShapefileCrs(
   entries: JSZip.JSZipObject[],
   fileName: string,
   report: ImportReport,
-): void {
+): Promise<void> {
   const prj = entries.find((entry) => extensionOf(entry.name) === 'prj');
   if (!prj) {
     report.notes.push(
       `${fileName}: no .prj found — coordinates were read as WGS84. Check the result on the map.`,
     );
+    return;
+  }
+  const wkt = await prj.async('text');
+  if (isWgs84Def(wkt)) {
+    report.notes.push(`${fileName}: already in WGS84 (${crsNameFromWkt(wkt)}).`);
+  } else {
+    report.notes.push(`${fileName}: reprojected from ${crsNameFromWkt(wkt)} to WGS84.`);
   }
 }
 

@@ -185,7 +185,23 @@ export interface ValidityReport {
   reason: string;
 }
 
+/**
+ * Validity results are cached against the geometry object. Detecting self-intersections
+ * compares every segment with every other, which is the most expensive thing the QA pass
+ * does; geometries are immutable, so a result stays true for the life of the object and
+ * re-running the checks after an unrelated edit costs nothing.
+ */
+const validityCache = new WeakMap<object, ValidityReport>();
+
 export function checkValidity(geometry: PolyGeom): ValidityReport {
+  const cached = validityCache.get(geometry);
+  if (cached) return cached;
+  const report = computeValidity(geometry);
+  validityCache.set(geometry, report);
+  return report;
+}
+
+function computeValidity(geometry: PolyGeom): ValidityReport {
   const rings = allRings(geometry);
   if (rings.length === 0) return { ok: false, kinkCount: 0, reason: 'geometry has no rings' };
   for (const ring of rings) {

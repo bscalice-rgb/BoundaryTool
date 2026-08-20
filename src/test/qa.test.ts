@@ -19,10 +19,12 @@ import { poly, squareRing } from './fixtures';
 /* -------------------------------------------------------------------------- */
 
 /** Builds a workspace of one field holding the given geometries. */
-function oneField(geometries: PolyGeom[], attrs = { client: 'A', farm: 'B', field: 'C' }) {
+function oneField(geometries: PolyGeom[], attrs = { client: 'A', farm: 'B', field: 'C' }): Workspace {
   const field = newField(attrs);
-  const features = geometries.map((g) => ({ ...newFeature(g, 'test.geojson'), fieldId: field.id }));
-  return { fields: [field], features } satisfies Workspace;
+  return {
+    fields: [field],
+    features: geometries.map((g) => ({ ...newFeature(g, 'test.geojson'), fieldId: field.id })),
+  };
 }
 
 const kindsOf = (workspace: Workspace) => runChecks(workspace).map((f) => f.kind);

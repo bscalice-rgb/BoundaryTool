@@ -20,6 +20,12 @@ export interface WFeature {
   fieldId: FieldId | null;
   /** Original attributes from the source file, kept only to offer attribute mapping. */
   sourceProps: Record<string, unknown>;
+  /**
+   * Client/Farm/Field values carried over from the source file, honouring the mapping
+   * the user chose at import. Used to pre-fill a new field's attributes when this
+   * feature is grouped; empty when the user declined to carry attributes across.
+   */
+  seed: { client: string; farm: string; field: string };
 }
 
 /**
@@ -83,3 +89,8 @@ export type AutoFixSpec =
   | { kind: 'delete-features' }
   | { kind: 'simplify'; toleranceMeters: number }
   | { kind: 'resolve-overlap' };
+
+/** The editing tool currently armed in the map toolbar. */
+export type Tool = 'select' | 'edit' | 'move' | 'draw' | 'cut-hole' | 'split' | 'simplify';
+
+export type Basemap = 'imagery' | 'street';

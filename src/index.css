@@ -1,0 +1,147 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-ink-950: #0b1120;
+  --color-ink-900: #111827;
+  --color-ink-850: #16202f;
+  --color-ink-800: #1c2836;
+  --color-ink-700: #2b3a4d;
+  --color-ink-600: #3d5064;
+  --color-ink-400: #7d8fa3;
+  --color-ink-300: #a8b6c5;
+  --color-ink-100: #e3e9ef;
+  --color-crop-500: #4ba350;
+  --color-crop-400: #62c168;
+  --color-crop-300: #8ad78f;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-ink-950);
+  color: var(--color-ink-100);
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------------------------------------------------------------- scrollbars */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-ink-700) transparent;
+}
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-ink-700);
+  border-radius: 5px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ------------------------------------------------------------------ leaflet */
+
+.leaflet-container {
+  background: #0b1120;
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.leaflet-control-attribution {
+  background: rgb(11 17 32 / 0.82) !important;
+  color: var(--color-ink-300) !important;
+  font-size: 10px !important;
+  padding: 2px 6px !important;
+  max-width: 60vw;
+}
+.leaflet-control-attribution a {
+  color: var(--color-crop-300) !important;
+}
+
+.leaflet-control-scale-line {
+  background: rgb(11 17 32 / 0.82) !important;
+  border-color: var(--color-ink-600) !important;
+  color: var(--color-ink-100) !important;
+}
+
+.leaflet-bar a,
+.leaflet-bar a:hover {
+  background: var(--color-ink-850);
+  color: var(--color-ink-100);
+  border-bottom-color: var(--color-ink-700);
+}
+.leaflet-bar a:hover {
+  background: var(--color-ink-800);
+}
+
+/* Geoman's own toolbar is hidden: every tool is driven from the app's toolbar so
+   there is one place to look and one place for keyboard shortcuts to hook into. */
+.leaflet-pm-toolbar {
+  display: none !important;
+}
+
+.leaflet-tooltip.measure-tooltip {
+  background: rgb(11 17 32 / 0.9);
+  border: 1px solid var(--color-ink-600);
+  color: var(--color-ink-100);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 6px;
+  box-shadow: none;
+  white-space: nowrap;
+}
+.leaflet-tooltip.measure-tooltip::before {
+  display: none;
+}
+
+/* --------------------------------------------------------------- app widgets */
+
+.field-input {
+  width: 100%;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 3px 5px;
+  color: inherit;
+  font: inherit;
+}
+.field-input:hover {
+  border-color: var(--color-ink-700);
+}
+.field-input:focus {
+  outline: none;
+  background: var(--color-ink-950);
+  border-color: var(--color-crop-500);
+}
+.field-input[data-empty='true'] {
+  background: rgb(220 38 38 / 0.14);
+  border-color: rgb(248 113 113 / 0.45);
+}
+
+input[type='range'] {
+  accent-color: var(--color-crop-500);
+}
+
+@keyframes flag-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(98 193 104 / 0);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgb(98 193 104 / 0.35);
+  }
+}
+.flag-active {
+  animation: flag-pulse 1.2s ease-in-out 2;
+}

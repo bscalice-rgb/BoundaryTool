@@ -66,6 +66,7 @@ describe('zipped shapefiles', () => {
     // The fixture was built from a square at 2.5E, 48.8N.
     expect(bbox[0]).toBeCloseTo(2.5, 4);
     expect(bbox[1]).toBeCloseTo(48.8, 4);
+    expect(report.notes.join(' ')).toContain('reprojected from WGS_1984_UTM_Zone_31N');
   });
 
   it('keeps the attributes of a reprojected shapefile', async () => {
@@ -77,10 +78,11 @@ describe('zipped shapefiles', () => {
     });
   });
 
-  it('reads a WGS84 zipped shapefile unchanged', async () => {
+  it('reads a WGS84 zipped shapefile unchanged and says so', async () => {
     const report = await importFiles([fileFrom('plots.zip', await wgs84ShapefileZip())]);
     expect(report.features).toHaveLength(1);
     expect(bboxOf(report.features[0].geometry)[0]).toBeCloseTo(1.0, 6);
+    expect(report.notes.join(' ')).toContain('already in WGS84');
   });
 
   it('reads loose .shp/.dbf/.prj files selected together as one layer', async () => {
