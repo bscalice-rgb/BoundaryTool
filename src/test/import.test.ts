@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { guessAttributes, importFiles } from '../lib/import';
+import { applyMapping, collectColumns, guessMapping, importFiles } from '../lib/import';
 import { areaHa, bboxOf } from '../lib/geo';
 import {
   KML_DOC,
@@ -33,10 +33,10 @@ describe('KML and KMZ', () => {
   it('carries KML ExtendedData through as source attributes', async () => {
     const report = await importFiles([fileFrom('fields.kml', KML_DOC)]);
     const church = report.features.find((f) => f.sourceProps.name === 'Church Field');
-    expect(guessAttributes(church!.sourceProps)).toEqual({
-      client: 'Bell Farms',
-      farm: 'Manor',
-      field: 'Church Field',
+    expect(church!.sourceProps).toMatchObject({
+      Client: 'Bell Farms',
+      Farm: 'Manor',
+      name: 'Church Field',
     });
   });
 
@@ -71,7 +71,8 @@ describe('zipped shapefiles', () => {
 
   it('keeps the attributes of a reprojected shapefile', async () => {
     const report = await importFiles([fileFrom('parcelles.zip', await utmShapefileZip())]);
-    expect(guessAttributes(report.features[0].sourceProps)).toEqual({
+    const columns = collectColumns(report.features.map((f) => f.sourceProps));
+    expect(applyMapping(report.features[0].sourceProps, guessMapping(columns))).toEqual({
       client: 'Ferme SA',
       farm: 'Nord',
       field: 'Parcelle 1',
@@ -187,5 +188,71 @@ describe('mixed batches', () => {
   it('rejects an unsupported file type', async () => {
     const report = await importFiles([fileFrom('notes.txt', 'hello')]);
     expect(report.errors[0]).toContain('unsupported file type');
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Column mapping                                                              */
+/* -------------------------------------------------------------------------- */
+
+describe('choosing which column is which', () => {
+  const props = [
+    { organization: 'Acme Ltd', holding: 'Manor', parcel_ref: 'Long Acre', area_ha: 12.4 },
+    { organization: 'Acme Ltd', holding: 'Manor', parcel_ref: 'Short Acre', area_ha: 8.1 },
+    { organization: '', holding: 'Manor', parcel_ref: 'Church Piece', area_ha: 3 },
+  ];
+
+  it('lists every populated column with a sample and a fill count', () => {
+    const columns = collectColumns(props);
+    expect(columns.map((c) => c.key).sort()).toEqual([
+      'area_ha',
+      'holding',
+      'organization',
+      'parcel_ref',
+    ]);
+    const organization = columns.find((c) => c.key === 'organization')!;
+    expect(organization.filled).toBe(2);
+    expect(organization.sample).toBe('Acme Ltd');
+  });
+
+  it('drops columns that are empty everywhere, since they cannot fill anything', () => {
+    const columns = collectColumns([{ note: '', keep: 'yes' }]);
+    expect(columns.map((c) => c.key)).toEqual(['keep']);
+  });
+
+  it('guesses the obvious synonyms, including organization for client', () => {
+    expect(guessMapping(collectColumns(props))).toEqual({
+      client: 'organization',
+      farm: 'holding',
+      field: 'parcel_ref',
+    });
+  });
+
+  it('leaves an attribute unguessed rather than pointing it at the wrong column', () => {
+    const columns = collectColumns([{ grower: 'Acme', ref: 'A1' }]);
+    expect(guessMapping(columns)).toEqual({ client: 'grower', farm: null, field: null });
+  });
+
+  it('never points two attributes at the same column', () => {
+    // "name" matches the field hint; nothing else matches, so farm stays blank.
+    const columns = collectColumns([{ name: 'Long Acre' }]);
+    const mapping = guessMapping(columns);
+    const used = [mapping.client, mapping.farm, mapping.field].filter((k) => k !== null);
+    expect(new Set(used).size).toBe(used.length);
+  });
+
+  it('reads a feature through whatever mapping the user picked', () => {
+    expect(
+      applyMapping(props[0], { client: 'organization', farm: null, field: 'parcel_ref' }),
+    ).toEqual({ client: 'Acme Ltd', farm: '', field: 'Long Acre' });
+  });
+
+  it('stringifies numbers, so a numeric field reference still carries across', () => {
+    expect(applyMapping({ ref: 42 }, { client: null, farm: null, field: 'ref' }).field).toBe('42');
+  });
+
+  it('counts values that the 30-character column would shorten', () => {
+    const columns = collectColumns([{ long: 'X'.repeat(31) }, { long: 'short' }]);
+    expect(columns[0].tooLong).toBe(1);
   });
 });

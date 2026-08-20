@@ -31,16 +31,20 @@ rather your browser not do that. Geolocation also needs a secure context, so it 
 
 ## How it works
 
-1. **Drop files.** Anything not already in WGS84 is reprojected on import. If a source
-   file carries values that look like Client, Farm or Field names, you are offered the
-   chance to carry them across and pre-group by them.
+1. **Drop files.** Anything not already in WGS84 is reprojected on import. You then say
+   which source column holds the Client, which the Farm and which the Field — whatever
+   the file happens to call them, so a column named `organization` can feed Client. Any
+   of the three can be left blank and filled in later.
 2. **Group into fields.** A *field* is the CropForce unit: one row in the attribute
    table and one MultiPolygon in the export. It can be built from any number of
    polygons, from any number of source files, with holes cut into any of them. What
-   counts as one field is always your decision — the tool never guesses.
-3. **Name in bulk where it helps.** Tick several fields and set one Client or Farm name
-   across all of them at once. Field names stay per-row, because each one names a
-   different field.
+   counts as one field is always your decision — the tool never guesses. Two imported
+   polygons that share a name are **not** merged: that is far more often two fields
+   whose names collide than one field in two pieces, and the duplicate-name check puts
+   the choice in front of you.
+3. **Name in bulk where it helps.** Search the list by client, farm, field or source
+   file, tick what you find, and set one Client or Farm name across all of it at once.
+   Field names stay per-row, because each one names a different field.
 4. **Clean and fix.** The quality panel checks each field and offers two routes for
    every flag: an automatic correction, or a manual one that selects the offending
    geometry and arms the right editing tool. Everything, auto-fixes included, is one
@@ -69,10 +73,17 @@ row. Features that belong to no field are not exported, and the quality panel sa
 | Field with no polygons assigned | yes | none |
 | Self-intersecting or invalid geometry | yes | un-kink and re-merge the outline |
 | Two fields overlapping | yes | you pick which field keeps the shared area; it is clipped out of the other |
+| Duplicate `Client`/`Farm`/`Field` | yes | number the surplus apart, or combine them if they are one field |
 | Jagged, over-dense boundaries | no | simplify at a suggested tolerance, with preview |
 | Non-crop area likely included | no | none — a heuristic hint, hand-corrected with the hole-cut tool |
 | Slivers below 0.05 ha | no | delete |
 | Season-specific field name | no | none — warning only |
+
+The duplicate check is the one that is about the destination rather than the geometry:
+CropForce identifies a field by its Client/Farm/Field combination, so uploading the same
+combination twice replaces the first with the second and a boundary disappears without
+warning. Case and extra spacing are treated as the same name, because they collide in
+practice even where they do not today.
 
 Each check carries a tooltip explaining the boundary criterion behind it — single
 continuous management zone, crop area only, exclusion zones, smoothing, multi-polygon
@@ -98,6 +109,10 @@ Keyboard: `V` select, `E` vertices, `M` move, `D` draw, `H` cut hole, `S` split,
 - `.geojson` / `.json`, including files declaring a projected CRS in the legacy `crs`
   member (common EPSG families are resolved offline; anything exotic is reported rather
   than silently misplaced)
+
+One mapping is applied to a whole batch. If the files you are loading name their columns
+differently from each other — one calls it `Field`, another `name` — import them
+separately, or map what you can and fill the rest in from the table.
 
 ## Running it
 

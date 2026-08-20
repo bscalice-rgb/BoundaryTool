@@ -143,6 +143,7 @@ const FLAG_LABELS: Record<QAFlag['kind'], string> = {
   naming: 'Consistent naming',
   unassigned: 'Multi-polygon fields',
   'empty-field': 'Single continuous zone',
+  'duplicate-name': 'Consistent naming',
 };
 
 function SectionLabel({ children }: { children: React.ReactNode }) {

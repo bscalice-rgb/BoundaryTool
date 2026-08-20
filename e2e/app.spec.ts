@@ -49,8 +49,8 @@ async function importFixtures(page: Page): Promise<void> {
   await page.setInputFiles('input[type=file]', FILES);
   const dialog = page.getByRole('dialog', { name: 'Import boundaries' });
   await expect(dialog).toBeVisible();
-  for (const name of ['client', 'farm', 'field']) {
-    await dialog.getByRole('checkbox', { name }).uncheck();
+  for (const target of ['client', 'farm', 'field']) {
+    await dialog.getByLabel(`${target} column`).selectOption('');
   }
   await page.getByRole('button', { name: 'Add to workspace' }).click();
   await expect(dialog).toBeHidden();
@@ -77,30 +77,60 @@ test('imports a KMZ, a UTM shapefile and a GeoJSON in one drop', async ({ page }
   // The shapefile was in UTM zone 31N and has to be reprojected on the way in.
   await expect(dialog.getByText(/reprojected/i)).toBeVisible();
 
-  await dialog.getByRole('checkbox', { name: 'client' }).uncheck();
-  await dialog.getByRole('checkbox', { name: 'farm' }).uncheck();
-  await dialog.getByRole('checkbox', { name: 'field' }).uncheck();
+  await dialog.getByLabel('client column').selectOption('');
+  await dialog.getByLabel('farm column').selectOption('');
+  await dialog.getByLabel('field column').selectOption('');
   await page.getByRole('button', { name: 'Add to workspace' }).click();
 
   await expect(page.getByText('Ungrouped polygons')).toBeVisible();
   await expect(page.locator('text=/4 polygons? not assigned/')).toBeVisible();
 });
 
-test('pre-groups by the attributes a source file already carries', async ({ page }) => {
+test('maps a source column onto a CropForce attribute', async ({ page }) => {
   await page.goto('/');
   await page.setInputFiles('input[type=file]', FILES);
-  // The mapping checkboxes are pre-ticked because these files do carry usable names.
+  const dialog = page.getByRole('dialog', { name: 'Import boundaries' });
+
+  // The guess pre-selects the obvious columns, and shows a sample so two similar ones
+  // can be told apart.
+  await expect(dialog.getByLabel('client column')).toHaveValue('Client');
+  await expect(dialog.getByText('e.g. “Bell Farms”')).toBeVisible();
+
+  // The KML calls its field name "name"; pointing Field at it is the user's choice.
+  await dialog.getByLabel('field column').selectOption('name');
   await page.getByRole('button', { name: 'Add to workspace' }).click();
 
-  // The shapefile names its parcel and each KML placemark names itself, so each
-  // arrives as its own field with the Field column already filled in.
-  const fieldCells = page.locator('input[aria-label="field"]');
-  await expect(fieldCells).toHaveCount(4);
-  const names = await fieldCells.evaluateAll((inputs) =>
-    (inputs as HTMLInputElement[]).map((input) => input.value).sort(),
-  );
-  expect(names).toEqual(['Bottom Meadow', 'Church Field', 'Parcelle 1', 'Two Halves']);
-  await expect(page.getByText('Ungrouped polygons')).toBeHidden();
+  const names = await page
+    .locator('input[aria-label="field"]')
+    .evaluateAll((inputs) => (inputs as HTMLInputElement[]).map((input) => input.value).sort());
+  expect(names).toContain('Church Field');
+  expect(names).toContain('Two Halves');
+});
+
+test('leaves an attribute blank when no column is chosen for it', async ({ page }) => {
+  await page.goto('/');
+  await page.setInputFiles('input[type=file]', FILES);
+  const dialog = page.getByRole('dialog', { name: 'Import boundaries' });
+
+  await dialog.getByLabel('farm column').selectOption('');
+  await page.getByRole('button', { name: 'Add to workspace' }).click();
+
+  const farms = await page
+    .locator('input[aria-label="farm"]')
+    .evaluateAll((inputs) => (inputs as HTMLInputElement[]).map((input) => input.value));
+  expect(farms.every((value) => value === '')).toBe(true);
+  // Client was still mapped, so it came across.
+  await expect(page.locator('input[aria-label="client"]').first()).not.toHaveValue('');
+});
+
+test('will not point two attributes at the same column', async ({ page }) => {
+  await page.goto('/');
+  await page.setInputFiles('input[type=file]', FILES);
+  const dialog = page.getByRole('dialog', { name: 'Import boundaries' });
+
+  await dialog.getByLabel('farm column').selectOption('Client');
+  // Claiming a column for Farm releases it from Client rather than duplicating it.
+  await expect(dialog.getByLabel('client column')).toHaveValue('');
 });
 
 test('groups polygons from different files into one field and exports it', async ({ page }) => {
@@ -322,11 +352,13 @@ test('resolves an overlap between two fields and undoes the clip', async ({ page
 });
 
 test.describe('bulk naming', () => {
-  /** Imports with mapping on, so each source polygon arrives as its own named field. */
+  /** Imports with the guessed mapping, which names every one of the four polygons. */
+  const FIELD_COUNT = 4;
+
   async function importAsFields(page: Page) {
     await page.setInputFiles('input[type=file]', FILES);
     await page.getByRole('button', { name: 'Add to workspace' }).click();
-    await expect(page.locator('input[aria-label="field"]')).toHaveCount(4);
+    await expect(page.locator('input[aria-label="field"]')).toHaveCount(FIELD_COUNT);
   }
 
   const clientValues = (page: Page) =>
@@ -339,19 +371,20 @@ test.describe('bulk naming', () => {
     await importAsFields(page);
 
     await page.getByRole('checkbox', { name: 'Select all fields' }).check();
-    await expect(page.getByText('4 fields ticked')).toBeVisible();
+    await expect(page.getByText(`${FIELD_COUNT} fields ticked`)).toBeVisible();
 
     await page.locator('input[aria-label="Client for all ticked fields"]').fill('Ferme SA');
     await page.locator('input[aria-label="Farm for all ticked fields"]').fill('Nord');
     await page.getByRole('button', { name: 'Apply' }).click();
 
-    expect(await clientValues(page)).toEqual(['Ferme SA', 'Ferme SA', 'Ferme SA', 'Ferme SA']);
+    expect(await clientValues(page)).toEqual(Array(FIELD_COUNT).fill('Ferme SA'));
     await expect(page.locator('input[aria-label="farm"]').first()).toHaveValue('Nord');
     // The per-row field names are untouched by a bulk client change.
     const fieldNames = await page
       .locator('input[aria-label="field"]')
       .evaluateAll((inputs) => (inputs as HTMLInputElement[]).map((input) => input.value).sort());
-    expect(fieldNames).toEqual(['Bottom Meadow', 'Church Field', 'Parcelle 1', 'Two Halves']);
+    expect(fieldNames).toContain('Church Field');
+    expect(fieldNames).toContain('Two Halves');
   });
 
   test('touches only the fields that are ticked', async ({ page }) => {
@@ -494,6 +527,118 @@ test('reports a refused location rather than failing silently', async ({ page })
   await page.getByRole('button', { name: 'Zoom to my location' }).click();
   await expect(page.getByText(/the browser blocked it/)).toBeVisible();
   await expect(page.locator('.location-dot')).toHaveCount(0);
+});
+
+test.describe('finding a field', () => {
+  async function importNamed(page: Page) {
+    await page.setInputFiles('input[type=file]', FILES);
+    await page.getByRole('dialog', { name: 'Import boundaries' }).getByLabel('field column')
+      .selectOption('name');
+    await page.getByRole('button', { name: 'Add to workspace' }).click();
+    await expect(page.locator('input[aria-label="field"]')).toHaveCount(4);
+  }
+
+  test('filters the list down to what was typed', async ({ page }) => {
+    await page.goto('/');
+    await importNamed(page);
+
+    await page.getByLabel('Search fields').fill('church');
+    await expect(page.locator('input[aria-label="field"]')).toHaveCount(1);
+    await expect(page.locator('input[aria-label="field"]').first()).toHaveValue('Church Field');
+    await expect(page.getByText('1 of 4 fields')).toBeVisible();
+  });
+
+  test('matches on any column, in any word order', async ({ page }) => {
+    await page.goto('/');
+    await importNamed(page);
+
+    // "Bell Farms" is the Client and "Church Field" the Field: two columns, reversed.
+    await page.getByLabel('Search fields').fill('church bell');
+    await expect(page.locator('input[aria-label="field"]')).toHaveCount(1);
+  });
+
+  test('matches the source filename too', async ({ page }) => {
+    await page.goto('/');
+    await importNamed(page);
+
+    await page.getByLabel('Search fields').fill('parcelles.zip');
+    await expect(page.locator('input[aria-label="field"]')).toHaveCount(1);
+  });
+
+  test('says so when nothing matches, and clears back to everything', async ({ page }) => {
+    await page.goto('/');
+    await importNamed(page);
+
+    await page.getByLabel('Search fields').fill('nothing here');
+    await expect(page.getByText(/Nothing matches/)).toBeVisible();
+
+    await page.getByRole('button', { name: 'Clear search' }).click();
+    await expect(page.locator('input[aria-label="field"]')).toHaveCount(4);
+  });
+
+  test('zooms the map to the matches', async ({ page }) => {
+    await page.goto('/');
+    await importNamed(page);
+
+    await page.getByLabel('Search fields').fill('parcelles');
+    await page.getByRole('button', { name: 'Zoom to matching fields' }).click();
+    await expect(page.locator('.leaflet-control-scale-line').first()).toHaveText(/\bm$/);
+  });
+});
+
+test.describe('duplicate Client/Farm/Field', () => {
+  /** Two polygons deliberately given the same three names. */
+  async function twoCollidingFields(page: Page) {
+    await importFixtures(page);
+    const ungrouped = page.locator('section', { hasText: 'Ungrouped polygons' });
+
+    for (const index of [0, 1]) {
+      await ungrouped.locator('button', { hasText: /blocks\.kmz|parcelles\.zip|extra\.geojson/ })
+        .first()
+        .click();
+      await page.getByRole('button', { name: 'Combine into one field' }).click();
+      await attributeCell(page, 'client').nth(index).fill('Acme');
+      await attributeCell(page, 'farm').nth(index).fill('Home');
+      await attributeCell(page, 'field').nth(index).fill('Long Acre');
+    }
+  }
+
+  test('blocks the export and offers to number them apart', async ({ page }) => {
+    await page.goto('/');
+    await twoCollidingFields(page);
+
+    const flag = page.locator('article', { hasText: 'share the name' });
+    await expect(flag).toBeVisible();
+    await expect(flag).toContainText('CropForce would keep only the last one uploaded');
+
+    await page.getByRole('button', { name: 'Export merged shapefile for CropForce' }).click();
+    const exportDialog = page.getByRole('dialog', { name: 'Export for CropForce' });
+    await expect(exportDialog.getByText(/blocked until these are resolved/)).toBeVisible();
+    await exportDialog.getByRole('button', { name: 'Close', exact: true }).click();
+
+    await flag.getByRole('button', { name: 'Auto-fix' }).click();
+
+    const names = await page
+      .locator('input[aria-label="field"]')
+      .evaluateAll((inputs) => (inputs as HTMLInputElement[]).map((input) => input.value));
+    expect(names).toEqual(['Long Acre', 'Long Acre (2)']);
+    await expect(page.locator('article', { hasText: 'share the name' })).toBeHidden();
+  });
+
+  test('clears just as well by combining them into one field', async ({ page }) => {
+    await page.goto('/');
+    await twoCollidingFields(page);
+    await expect(page.locator('article', { hasText: 'share the name' })).toBeVisible();
+
+    // The other honest resolution: they really were one field in two blocks.
+    await page.locator('article', { hasText: 'share the name' })
+      .getByRole('button', { name: 'Fix manually' })
+      .click();
+    await page.getByRole('button', { name: 'Combine into one field' }).click();
+
+    await expect(page.locator('article', { hasText: 'share the name' })).toBeHidden();
+    await expect(page.locator('input[aria-label="field"]')).toHaveCount(1);
+  });
 });
 
 test('keeps nothing across a reload and contacts only basemap hosts', async ({ page }) => {

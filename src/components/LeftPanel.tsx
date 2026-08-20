@@ -40,12 +40,52 @@ export default function LeftPanel(props: LeftPanelProps) {
   const [expanded, setExpanded] = useState<ReadonlySet<FieldId>>(new Set());
   /** Fields ticked for bulk attribute editing. Separate from the polygon selection. */
   const [checked, setChecked] = useState<ReadonlySet<FieldId>>(new Set());
+  const [search, setSearch] = useState('');
 
-  const fields = useMemo(() => fieldGeometries(workspace), [workspace]);
-  const ungrouped = useMemo(
+  const allFields = useMemo(() => fieldGeometries(workspace), [workspace]);
+  const allUngrouped = useMemo(
     () => workspace.features.filter((f) => f.fieldId === null),
     [workspace.features],
   );
+
+  // Every word typed has to appear somewhere in the row, so "acme long" finds Long Acre
+  // at Acme without caring which column holds which word or what order they are in.
+  const terms = useMemo(
+    () => search.toLowerCase().split(/\s+/).filter(Boolean),
+    [search],
+  );
+  const matches = (haystack: string) => {
+    const text = haystack.toLowerCase();
+    return terms.every((term) => text.includes(term));
+  };
+
+  const fields = useMemo(
+    () =>
+      terms.length === 0
+        ? allFields
+        : allFields.filter((entry) =>
+            matches(
+              [entry.field.client, entry.field.farm, entry.field.field]
+                .concat(
+                  workspace.features
+                    .filter((f) => f.fieldId === entry.field.id)
+                    .map((f) => f.source),
+                )
+                .join(' '),
+            ),
+          ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allFields, terms, workspace.features],
+  );
+
+  const ungrouped = useMemo(
+    () => (terms.length === 0 ? allUngrouped : allUngrouped.filter((f) => matches(f.source))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allUngrouped, terms],
+  );
+
+  const hiddenFields = allFields.length - fields.length;
+  const searching = terms.length > 0;
 
   const blockingByField = useMemo(() => {
     const map = new Map<FieldId, number>();
@@ -60,7 +100,10 @@ export default function LeftPanel(props: LeftPanelProps) {
   const selectedIds = [...selection];
 
   // A field that has been deleted or ungrouped must not stay ticked invisibly.
-  const liveFieldIds = useMemo(() => new Set(fields.map((entry) => entry.field.id)), [fields]);
+  const liveFieldIds = useMemo(
+    () => new Set(allFields.map((entry) => entry.field.id)),
+    [allFields],
+  );
   const checkedIds = useMemo(
     () => [...checked].filter((id) => liveFieldIds.has(id)),
     [checked, liveFieldIds],
@@ -90,15 +133,80 @@ export default function LeftPanel(props: LeftPanelProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col border-r border-ink-800 bg-ink-900">
-      <PanelHeader title="Fields" count={fields.length}>
+      <PanelHeader title="Fields" count={allFields.length}>
         <InfoDot text={ATTRIBUTE_GUIDANCE} label="Client / Farm / Field" />
         <Button tone="ghost" onClick={props.onNewField} title="Create an empty field row">
           + Field
         </Button>
       </PanelHeader>
 
+      <div className="shrink-0 border-b border-ink-800 px-2 py-1.5">
+        <div className="relative">
+          <svg
+            viewBox="0 0 16 16"
+            className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-ink-500"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            aria-hidden="true"
+          >
+            <circle cx="7" cy="7" r="4.5" />
+            <path d="M10.5 10.5L14 14" strokeLinecap="round" />
+          </svg>
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            onKeyDown={(event) => event.key === 'Escape' && setSearch('')}
+            placeholder="Search client, farm, field or file"
+            spellCheck={false}
+            aria-label="Search fields"
+            className="w-full rounded-md border border-ink-700 bg-ink-950 py-1.5 pl-7 pr-16
+              text-xs text-ink-100 placeholder:text-ink-600 focus:border-crop-500 focus:outline-none"
+          />
+          {searching && (
+            <span className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-1">
+              <button
+                type="button"
+                onClick={() => props.onZoomToFeatures(fields.flatMap((entry) => entry.featureIds))}
+                disabled={fields.length === 0}
+                aria-label="Zoom to matching fields"
+                title="Zoom the map to the matching fields"
+                className="rounded px-1.5 py-0.5 text-[10px] text-ink-400 hover:bg-ink-800
+                  hover:text-crop-300 disabled:opacity-40"
+              >
+                Zoom
+              </button>
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                aria-label="Clear search"
+                className="rounded px-1 py-0.5 text-ink-500 hover:bg-ink-800 hover:text-ink-100"
+              >
+                <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
+                </svg>
+              </button>
+            </span>
+          )}
+        </div>
+        {searching && (
+          <p className="mt-1 px-0.5 text-[10px] text-ink-500">
+            {fields.length} of {allFields.length} field{allFields.length === 1 ? '' : 's'}
+            {hiddenFields > 0 && ` · ${hiddenFields} hidden`}
+            {allUngrouped.length > 0 &&
+              ` · ${ungrouped.length} of ${allUngrouped.length} ungrouped`}
+          </p>
+        )}
+      </div>
+
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {fields.length === 0 && ungrouped.length === 0 && (
+        {searching && fields.length === 0 && ungrouped.length === 0 && (
+          <p className="px-3 py-4 text-xs leading-relaxed text-ink-400">
+            Nothing matches “{search}”.
+          </p>
+        )}
+
+        {!searching && fields.length === 0 && ungrouped.length === 0 && (
           <p className="px-3 py-4 text-xs leading-relaxed text-ink-400">
             Nothing loaded yet. Drop boundary files anywhere on the window, or draw a polygon
             with the map toolbar.
@@ -189,7 +297,9 @@ export default function LeftPanel(props: LeftPanelProps) {
             <tfoot>
               <tr className="text-[11px] text-ink-400">
                 <td colSpan={5} className="border-t border-ink-800 px-2 py-1.5">
-                  {fields.length} field{fields.length === 1 ? '' : 's'} to export
+                  {searching
+                    ? `${fields.length} shown of ${allFields.length}`
+                    : `${fields.length} field${fields.length === 1 ? '' : 's'} to export`}
                 </td>
                 <td className="border-t border-ink-800 px-1.5 py-1.5 text-right tabular-nums text-ink-100">
                   {formatHa(totalHa)}

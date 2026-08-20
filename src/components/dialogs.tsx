@@ -1,8 +1,7 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { WField, Workspace } from '../types';
-import type { ImportReport } from '../lib/import';
-import { availableAttributeSources } from '../lib/import';
-import type { AttributeMapping } from '../state/ops';
+import type { AttributeTarget, ColumnMapping, ImportReport } from '../lib/import';
+import { collectColumns, guessMapping } from '../lib/import';
 import type { ExportBlockers, ExportPlan } from '../lib/export';
 import { describeField } from '../lib/qa';
 import { Button, Modal } from './ui';
@@ -17,14 +16,27 @@ export function ImportDialog({
   onCancel,
 }: {
   report: ImportReport;
-  onConfirm: (mapping: AttributeMapping) => void;
+  onConfirm: (mapping: ColumnMapping) => void;
   onCancel: () => void;
 }) {
-  const available = availableAttributeSources(report.features.map((f) => f.sourceProps));
-  const anyAvailable = available.client || available.farm || available.field;
-  const [mapping, setMapping] = useState<AttributeMapping>(available);
+  const columns = useMemo(
+    () => collectColumns(report.features.map((f) => f.sourceProps)),
+    [report.features],
+  );
+  const [mapping, setMapping] = useState<ColumnMapping>(() => guessMapping(columns));
 
   const sources = [...new Set(report.features.map((f) => f.source))];
+  const byKey = new Map(columns.map((column) => [column.key, column]));
+
+  const choose = (target: AttributeTarget, key: string | null) =>
+    setMapping((current) => {
+      const next = { ...current, [target]: key };
+      // One column cannot fill two attributes, so picking it here releases it there.
+      for (const other of ['client', 'farm', 'field'] as AttributeTarget[]) {
+        if (other !== target && key !== null && next[other] === key) next[other] = null;
+      }
+      return next;
+    });
 
   return (
     <Modal title="Import boundaries" onClose={onCancel}>
@@ -74,38 +86,57 @@ export function ImportDialog({
       {report.features.length > 0 && (
         <fieldset className="mt-4">
           <legend className="text-[11px] font-semibold text-ink-100">
-            Carry attributes across
+            Which column is which?
           </legend>
           <p className="mt-1 text-[11px] leading-relaxed text-ink-400">
-            {anyAvailable
-              ? 'These files already carry values that look like Client, Farm or Field names. ' +
-                'Polygons that end up with matching values are grouped into one field, ready ' +
-                'for you to check.'
-              : 'No Client, Farm or Field values were found in these files, so every polygon ' +
-                'arrives ungrouped for you to group and name.'}
+            {columns.length === 0
+              ? 'These files carry no attributes, so every polygon arrives unnamed for you ' +
+                'to group and name yourself.'
+              : 'Point each CropForce attribute at the column that holds it — whatever the ' +
+                'file happens to call it. Anything left blank you fill in yourself. Each ' +
+                'polygon still arrives as its own field; nothing is merged on your behalf.'}
           </p>
-          <div className="mt-2 space-y-1.5">
-            {(['client', 'farm', 'field'] as const).map((key) => (
-              <label
-                key={key}
-                className={`flex items-center gap-2 text-xs ${
-                  available[key] ? 'text-ink-100' : 'cursor-not-allowed text-ink-600'
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  disabled={!available[key]}
-                  checked={mapping[key] && available[key]}
-                  onChange={(event) =>
-                    setMapping((current) => ({ ...current, [key]: event.target.checked }))
-                  }
-                  className="h-3.5 w-3.5 accent-crop-500"
-                />
-                <span className="capitalize">{key}</span>
-                {!available[key] && <span className="text-[10px]">not found in these files</span>}
-              </label>
-            ))}
-          </div>
+
+          {columns.length > 0 && (
+            <div className="mt-2.5 space-y-2">
+              {(['client', 'farm', 'field'] as AttributeTarget[]).map((target) => {
+                const chosen = mapping[target] === null ? null : byKey.get(mapping[target]!);
+                return (
+                  <label key={target} className="grid grid-cols-[64px_1fr] items-center gap-2">
+                    <span className="text-xs font-medium text-ink-100 capitalize">{target}</span>
+                    <span>
+                      <select
+                        value={mapping[target] ?? ''}
+                        aria-label={`${target} column`}
+                        onChange={(event) => choose(target, event.target.value || null)}
+                        className="w-full rounded-md border border-ink-700 bg-ink-950 px-2 py-1.5
+                          text-xs text-ink-100 focus:border-crop-500 focus:outline-none"
+                      >
+                        <option value="">— leave blank —</option>
+                        {columns.map((column) => (
+                          <option key={column.key} value={column.key}>
+                            {column.key} ({column.filled}/{report.features.length})
+                          </option>
+                        ))}
+                      </select>
+                      {chosen && (
+                        <span className="mt-1 block truncate text-[10px] text-ink-500">
+                          e.g. “{chosen.sample}”
+                          {chosen.tooLong > 0 && (
+                            <span className="text-amber-400">
+                              {' '}
+                              · {chosen.tooLong} value{chosen.tooLong === 1 ? '' : 's'} over 30
+                              characters will be shortened on export
+                            </span>
+                          )}
+                        </span>
+                      )}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
         </fieldset>
       )}
 

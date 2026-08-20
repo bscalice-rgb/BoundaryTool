@@ -420,42 +420,120 @@ function flattenGeometry(geometry: Geometry | null): PolyGeom[] {
 /* Attribute mapping                                                           */
 /* -------------------------------------------------------------------------- */
 
-/** Source attribute keys that plausibly hold a Client, Farm or Field name. */
-const ATTRIBUTE_HINTS: Record<'client' | 'farm' | 'field', RegExp> = {
-  client: /^(client|grower|customer|owner|account|producer)$/i,
-  farm: /^(farm|farm_name|farmname|holding|ranch|estate)$/i,
-  field: /^(field|field_name|fieldname|name|title|parcel|plot|block|tract|lot)$/i,
+/**
+ * Words that commonly appear in a column holding a Client, Farm or Field. These only
+ * seed the dropdowns in the import dialog — the user picks the real mapping, because no
+ * list of synonyms will ever cover what a given office happens to call its columns.
+ */
+const HINT_WORDS: Record<AttributeTarget, string[]> = {
+  client: [
+    'client', 'grower', 'customer', 'owner', 'account', 'producer',
+    'organisation', 'organization', 'org', 'company', 'business',
+  ],
+  farm: ['farm', 'farmname', 'holding', 'ranch', 'estate', 'unit', 'site', 'property'],
+  field: [
+    'field', 'fieldname', 'name', 'title', 'parcel', 'plot',
+    'block', 'tract', 'lot', 'paddock', 'enclosure',
+  ],
 };
 
-export interface AttributeGuess {
-  client: string;
-  farm: string;
-  field: string;
+/** "Parcel_Ref" and "parcel ref" both reduce to the same words. */
+const words = (key: string): string[] =>
+  key.trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
+
+export type AttributeTarget = 'client' | 'farm' | 'field';
+
+/**
+ * Which source column feeds each CropForce attribute. `null` means "leave blank", which
+ * is a legitimate choice: a file may simply not carry a Farm.
+ */
+export interface ColumnMapping {
+  client: string | null;
+  farm: string | null;
+  field: string | null;
 }
 
-/** Best-effort read of Client/Farm/Field out of a source file's own attributes. */
-export function guessAttributes(props: Record<string, unknown>): AttributeGuess {
-  const guess: AttributeGuess = { client: '', farm: '', field: '' };
-  for (const target of ['client', 'farm', 'field'] as const) {
-    const hit = Object.keys(props).find((key) => ATTRIBUTE_HINTS[target].test(key.trim()));
-    if (hit !== undefined) guess[target] = stringify(props[hit]);
-  }
-  return guess;
+export const NO_COLUMNS: ColumnMapping = { client: null, farm: null, field: null };
+
+export interface SourceColumn {
+  key: string;
+  /** First non-empty value found, shown so two similar columns can be told apart. */
+  sample: string;
+  /** How many of the imported features carry a value here. */
+  filled: number;
+  /** Values longer than the 30-character DBF column, which the export would shorten. */
+  tooLong: number;
 }
 
-/** Which of the three attributes any of the given features could supply a value for. */
-export function availableAttributeSources(
-  featuresProps: Record<string, unknown>[],
-): { client: boolean; farm: boolean; field: boolean } {
-  const any = { client: false, farm: false, field: false };
+/** Every attribute column present across the imported features, most-populated first. */
+export function collectColumns(featuresProps: Record<string, unknown>[]): SourceColumn[] {
+  const columns = new Map<string, SourceColumn>();
   for (const props of featuresProps) {
-    const guess = guessAttributes(props);
-    if (guess.client) any.client = true;
-    if (guess.farm) any.farm = true;
-    if (guess.field) any.field = true;
+    for (const [key, raw] of Object.entries(props)) {
+      const value = stringify(raw);
+      const column = columns.get(key) ?? { key, sample: '', filled: 0, tooLong: 0 };
+      if (value !== '') {
+        column.filled += 1;
+        if (!column.sample) column.sample = value;
+        if (value.length > 30) column.tooLong += 1;
+      }
+      columns.set(key, column);
+    }
   }
-  return any;
+  return [...columns.values()]
+    .filter((column) => column.filled > 0)
+    .sort((a, b) => b.filled - a.filled || a.key.localeCompare(b.key));
 }
+
+/**
+ * Pre-selects the columns whose names look like a Client, Farm or Field.
+ *
+ * Exact names are claimed first across all three, so a file with a plain "Field" column
+ * is never beaten to it by a "field_area". Only then does a looser pass look for the
+ * hint word anywhere in the name, which is what catches "parcel_ref" or "Farm Name".
+ * A column already claimed is never handed to a second attribute.
+ */
+export function guessMapping(columns: SourceColumn[]): ColumnMapping {
+  const mapping: ColumnMapping = { client: null, farm: null, field: null };
+  const targets: AttributeTarget[] = ['client', 'farm', 'field'];
+  const claimed = new Set<string>();
+
+  const claim = (target: AttributeTarget, matches: (column: SourceColumn) => boolean) => {
+    if (mapping[target] !== null) return;
+    const hit = columns.find((column) => !claimed.has(column.key) && matches(column));
+    if (!hit) return;
+    mapping[target] = hit.key;
+    claimed.add(hit.key);
+  };
+
+  for (const target of targets) {
+    claim(target, (column) => {
+      const parts = words(column.key);
+      return parts.length === 1 && HINT_WORDS[target].includes(parts[0]);
+    });
+  }
+  for (const target of targets) {
+    claim(target, (column) =>
+      words(column.key).some((word) => HINT_WORDS[target].includes(word)),
+    );
+  }
+  return mapping;
+}
+
+/** Reads the three attributes out of one feature's source data, per the chosen mapping. */
+export function applyMapping(
+  props: Record<string, unknown>,
+  mapping: ColumnMapping,
+): { client: string; farm: string; field: string } {
+  return {
+    client: mapping.client === null ? '' : stringify(props[mapping.client]),
+    farm: mapping.farm === null ? '' : stringify(props[mapping.farm]),
+    field: mapping.field === null ? '' : stringify(props[mapping.field]),
+  };
+}
+
+export const mappingIsEmpty = (mapping: ColumnMapping): boolean =>
+  mapping.client === null && mapping.farm === null && mapping.field === null;
 
 function stringify(value: unknown): string {
   if (value === null || value === undefined) return '';

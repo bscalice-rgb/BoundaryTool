@@ -58,7 +58,9 @@ export async function writeFixtures(): Promise<void> {
       features: [
         {
           type: 'Feature',
-          properties: { Name: 'Bottom Meadow' },
+          // Lower-case "name" matches what the KML placemarks produce, so one column
+          // mapping covers both files — which is what a real batch usually looks like.
+          properties: { name: 'Bottom Meadow' },
           geometry: { type: 'Polygon', coordinates: [ring(2.51, 48.81, 0.003)] },
         },
       ],

@@ -12,7 +12,6 @@ import type {
 } from './types';
 import { useWorkspaceHistory } from './state/history';
 import {
-  type AttributeMapping,
   addDrawnFeature,
   addImported,
   assignToField,
@@ -28,12 +27,13 @@ import {
   updateField,
   updateFields,
 } from './state/ops';
-import { type ImportReport, importFiles } from './lib/import';
+import { type ColumnMapping, type ImportReport, importFiles } from './lib/import';
 import { areaHa, bboxOf, simplifyMeters, splitByLine, vertexCount } from './lib/geo';
 import {
   autoDeleteFeatures,
   autoFixGeometry,
   autoSimplify,
+  autoUniquifyNames,
   resolveOverlap,
   runChecks,
 } from './lib/qa';
@@ -180,7 +180,7 @@ export default function App() {
   );
 
   const confirmImport = useCallback(
-    (mapping: AttributeMapping) => {
+    (mapping: ColumnMapping) => {
       const report = pendingImport;
       if (!report) return;
       setPendingImport(null);
@@ -344,7 +344,9 @@ export default function App() {
           ? autoFixGeometry(workspace, flag.featureIds)
           : spec.kind === 'delete-features'
             ? autoDeleteFeatures(workspace, flag.featureIds)
-            : autoSimplify(workspace, flag.featureIds, spec.toleranceMeters);
+            : spec.kind === 'uniquify-names'
+              ? autoUniquifyNames(workspace, flag.fieldIds)
+              : autoSimplify(workspace, flag.featureIds, spec.toleranceMeters);
 
       if (!outcome.ok) {
         toast(outcome.message, 'error');
@@ -366,7 +368,10 @@ export default function App() {
 
       switch (flag.manual) {
         case 'attributes': {
-          const field = workspace.fields.find((item) => item.id === flag.fieldIds[0]);
+          // A name collision is resolved in the Field cell of the second field, not the
+          // first: the first is the one keeping the name it already has.
+          const id = flag.kind === 'duplicate-name' ? flag.fieldIds[1] : flag.fieldIds[0];
+          const field = workspace.fields.find((item) => item.id === id);
           if (!field) break;
           const column =
             (['client', 'farm', 'field'] as const).find((key) => field[key].trim() === '') ??

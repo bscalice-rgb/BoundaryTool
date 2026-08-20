@@ -91,6 +91,12 @@ export const GUIDANCE: Record<FlagKind, string> = {
     'one field, not several.',
   'empty-field':
     'A field row needs geometry. Assign at least one polygon to it, or delete the field.',
+  'duplicate-name':
+    'CropForce identifies a field by its Client, Farm and Field combination, so that ' +
+    'combination has to be unique. Upload two rows with the same one and the second ' +
+    'replaces the first: a boundary goes missing without any warning. Either rename them ' +
+    'so each is distinct, or — if they really are one field farmed in separate blocks — ' +
+    'combine them into a single field with one name.',
 };
 
 /* -------------------------------------------------------------------------- */
@@ -229,6 +235,47 @@ export function runChecks(
         });
       }
     }
+  }
+
+  /*
+   * Duplicate Client/Farm/Field combinations. This is the one check that is about the
+   * destination rather than the geometry: CropForce keys a field on the combination, so
+   * a repeat silently overwrites whatever was uploaded first.
+   *
+   * Only fully-named fields are compared. A field still missing a name is already
+   * blocked by the check above, and treating every half-empty row as a collision with
+   * every other would bury that message in noise.
+   */
+  const named = fields.filter(
+    ({ field, geometry }) =>
+      // A field with no geometry writes no row, so it cannot collide with anything.
+      // It has its own flag already, and counting it here would only add noise.
+      geometry !== null && field.client.trim() && field.farm.trim() && field.field.trim(),
+  );
+  const byName = new Map<string, FieldGeometry[]>();
+  for (const entry of named) {
+    const key = nameKey(entry.field);
+    byName.set(key, [...(byName.get(key) ?? []), entry]);
+  }
+  for (const [key, group] of byName) {
+    if (group.length < 2) continue;
+    const first = group[0].field;
+    flags.push({
+      id: `duplicate:${key}`,
+      kind: 'duplicate-name',
+      severity: 'blocking',
+      title: `${group.length} fields share the name ${describeField(first)}`,
+      detail:
+        `${first.client} / ${first.farm} / ${first.field} is used ${group.length} times. ` +
+        'CropForce would keep only the last one uploaded and drop the rest. Auto-fix ' +
+        'numbers them apart; if they are one field in several blocks, select them and ' +
+        'combine them instead.',
+      guidance: GUIDANCE['duplicate-name'],
+      featureIds: group.flatMap((entry) => entry.featureIds),
+      fieldIds: group.map((entry) => entry.field.id),
+      autoFix: { kind: 'uniquify-names' },
+      manual: 'attributes',
+    });
   }
 
   const unassigned = workspace.features.filter((f) => f.fieldId === null);
@@ -461,6 +508,72 @@ export function describeFeature(workspace: Workspace, featureId: string): string
 }
 
 /* -------------------------------------------------------------------------- */
+/* Duplicate names                                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The identity CropForce sees. Case and runs of whitespace are ignored, because
+ * "North Field" and "north  field" are a collision waiting to happen even where they
+ * are not one today.
+ */
+export function nameKey(field: Pick<WField, 'client' | 'farm' | 'field'>): string {
+  return [field.client, field.farm, field.field]
+    .map((value) => value.trim().toLowerCase().replace(/\s+/g, ' '))
+    .join(' | ');
+}
+
+/** DBF character width for a Field value, mirrored from the export schema. */
+const FIELD_NAME_LIMIT = 30;
+
+/**
+ * Numbers a duplicated field name apart: "Long Acre" becomes "Long Acre (2)", trimmed
+ * to fit the column if it has to be, and never landing on a name already in use.
+ */
+export function uniqueFieldName(field: WField, taken: ReadonlySet<string>): string {
+  for (let n = 2; n < 1000; n++) {
+    const suffix = ` (${n})`;
+    const base = field.field.trim().slice(0, FIELD_NAME_LIMIT - suffix.length).trimEnd();
+    const candidate = `${base}${suffix}`;
+    if (!taken.has(nameKey({ ...field, field: candidate }))) return candidate;
+  }
+  return field.field;
+}
+
+/**
+ * Renames every field after the first in each colliding group. The first keeps the name
+ * it has, so the user's own naming survives and only the surplus is disturbed.
+ */
+export function autoUniquifyNames(workspace: Workspace, fieldIds: FieldId[]): FixOutcome {
+  const target = new Set(fieldIds);
+  const taken = new Set(workspace.fields.map(nameKey));
+  const seen = new Set<string>();
+  let renamed = 0;
+
+  const fields = workspace.fields.map((field) => {
+    if (!target.has(field.id)) return field;
+    const key = nameKey(field);
+    if (!seen.has(key)) {
+      // First one through keeps its name.
+      seen.add(key);
+      return field;
+    }
+    const name = uniqueFieldName(field, taken);
+    if (name === field.field) return field;
+    const renamedField = { ...field, field: name };
+    taken.add(nameKey(renamedField));
+    seen.add(nameKey(renamedField));
+    renamed++;
+    return renamedField;
+  });
+
+  return {
+    workspace: { ...workspace, fields },
+    message: `Renamed ${renamed} field${renamed === 1 ? '' : 's'} so each combination is unique.`,
+    ok: renamed > 0,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
 /* Blocking status                                                             */
 /* -------------------------------------------------------------------------- */
 
@@ -469,6 +582,7 @@ export const BLOCKING_KINDS: FlagKind[] = [
   'invalid-geometry',
   'overlap',
   'empty-field',
+  'duplicate-name',
 ];
 
 /** Field ids that cannot be exported, mapped to the reasons why. */

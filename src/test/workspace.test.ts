@@ -8,9 +8,11 @@ import {
   addImported,
   assignToField,
   combineIntoField,
+  createEmptyField,
   cutExclusionZone,
   deleteField,
   mergeFeatures,
+  newField,
   newFeature,
   replaceWithParts,
   setGeometry,
@@ -25,9 +27,12 @@ import {
   planExport,
   suggestFileName,
 } from '../lib/export';
-import { fieldGeometries, runChecks } from '../lib/qa';
+import { autoUniquifyNames, fieldGeometries, runChecks } from '../lib/qa';
 import { areaHa, splitByLine } from '../lib/geo';
-import { importFiles } from '../lib/import';
+import { NO_COLUMNS, importFiles } from '../lib/import';
+
+/** How the sample KML's own attributes map onto the CropForce three. */
+const KML_COLUMNS = { client: 'Client', farm: 'Farm', field: 'name' };
 import { KML_DOC, fileFrom, poly, squareRing, utmShapefileZip, kmzFile } from './fixtures';
 
 const square = (x: number, y: number, size = 0.003) => poly([squareRing(x, y, size)]);
@@ -84,8 +89,19 @@ describe('field grouping', () => {
 
     workspace = assignToField(workspace, [workspace.features[0].id], second);
     expect(workspace.features.every((f) => f.fieldId === second)).toBe(true);
-    // The field left with nothing but a name is kept so QA can point at it.
-    expect(workspace.fields.map((f) => f.id)).toContain(first);
+    // The field the polygon left behind is gone: its contents live in the other field
+    // now, and a named row with no geometry would only block the export.
+    expect(workspace.fields.map((f) => f.id)).not.toContain(first);
+  });
+
+  it('keeps a field that was created empty on purpose', () => {
+    let workspace = createEmptyField(emptyWorkspace());
+    const id = workspace.fields[0].id;
+    workspace = updateField(workspace, id, { field: 'To be drawn' });
+    workspace = addDrawnFeature(workspace, square(2.5, 48.8));
+    // Assigning an unrelated polygon elsewhere must not sweep away the waiting row.
+    workspace = assignToField(workspace, [workspace.features[0].id], null);
+    expect(workspace.fields.map((f) => f.id)).toContain(id);
   });
 
   it('drops a field that is emptied before it was ever named', () => {
@@ -120,11 +136,7 @@ describe('field grouping', () => {
 
   it('leaves a new field blank when the user declined to carry attributes across', async () => {
     const report = await importFiles([fileFrom('fields.kml', KML_DOC)]);
-    let workspace = addImported(emptyWorkspace(), report.features, {
-      client: false,
-      farm: false,
-      field: false,
-    });
+    let workspace = addImported(emptyWorkspace(), report.features, NO_COLUMNS);
     const church = workspace.features.find((f) => f.sourceProps.name === 'Church Field')!;
     workspace = combineIntoField(workspace, [church.id]);
     // Declining at import means declining later too, however tempting the source data.
@@ -133,11 +145,7 @@ describe('field grouping', () => {
 
   it('restores the carried-over names when a field is ungrouped and rebuilt', async () => {
     const report = await importFiles([fileFrom('fields.kml', KML_DOC)]);
-    let workspace = addImported(emptyWorkspace(), report.features, {
-      client: true,
-      farm: true,
-      field: true,
-    });
+    let workspace = addImported(emptyWorkspace(), report.features, KML_COLUMNS);
     const church = workspace.features.find((f) => f.sourceProps.name === 'Church Field')!;
     const original = workspace.fields.find((f) => f.id === church.fieldId)!;
     expect(original).toMatchObject({
@@ -153,6 +161,109 @@ describe('field grouping', () => {
       farm: 'Manor',
       field: 'Church Field',
     });
+  });
+});
+
+describe('duplicate Client/Farm/Field combinations', () => {
+  /** Two fields deliberately given the same three names. */
+  function collidingWorkspace(name = 'Long Acre'): Workspace {
+    let workspace: Workspace = {
+      fields: [],
+      features: [newFeature(square(2.5, 48.8), 'a.zip'), newFeature(square(2.6, 48.8), 'b.zip')],
+    };
+    for (const feature of [...workspace.features]) {
+      workspace = combineIntoField(workspace, [feature.id]);
+    }
+    for (const field of workspace.fields) {
+      workspace = updateField(workspace, field.id, {
+        client: 'Acme',
+        farm: 'Home',
+        field: name,
+      });
+    }
+    return workspace;
+  }
+
+  it('blocks the export, because CropForce would overwrite one with the other', () => {
+    const workspace = collidingWorkspace();
+    const flag = runChecks(workspace).find((f) => f.kind === 'duplicate-name');
+
+    expect(flag?.severity).toBe('blocking');
+    expect(flag?.fieldIds).toHaveLength(2);
+    expect(flag?.detail).toContain('Acme / Home / Long Acre');
+    expect(exportBlockers(runChecks(workspace), planExport(workspace)).blocked).toBe(true);
+  });
+
+  it('treats a difference of case or spacing as the same name', () => {
+    let workspace = collidingWorkspace();
+    workspace = updateField(workspace, workspace.fields[1].id, { field: 'long  ACRE' });
+    expect(runChecks(workspace).map((f) => f.kind)).toContain('duplicate-name');
+  });
+
+  it('does not flag fields that are genuinely distinct', () => {
+    let workspace = collidingWorkspace();
+    workspace = updateField(workspace, workspace.fields[1].id, { field: 'Short Acre' });
+    expect(runChecks(workspace).map((f) => f.kind)).not.toContain('duplicate-name');
+  });
+
+  it('stays quiet while a name is still being filled in', () => {
+    // Two half-empty rows are not a collision; the missing-attribute flag covers them.
+    const workspace: Workspace = {
+      fields: [newField({ client: 'Acme' }), newField({ client: 'Acme' })],
+      features: [],
+    };
+    expect(runChecks(workspace).map((f) => f.kind)).not.toContain('duplicate-name');
+  });
+
+  it('auto-fix numbers the surplus apart and leaves the first alone', () => {
+    const workspace = collidingWorkspace();
+    const flag = runChecks(workspace).find((f) => f.kind === 'duplicate-name')!;
+    const outcome = autoUniquifyNames(workspace, flag.fieldIds);
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.workspace.fields.map((f) => f.field)).toEqual(['Long Acre', 'Long Acre (2)']);
+    expect(runChecks(outcome.workspace).map((f) => f.kind)).not.toContain('duplicate-name');
+  });
+
+  it('keeps renamed values inside the 30-character column', () => {
+    const workspace = collidingWorkspace('X'.repeat(30));
+    const flag = runChecks(workspace).find((f) => f.kind === 'duplicate-name')!;
+    const outcome = autoUniquifyNames(workspace, flag.fieldIds);
+
+    for (const field of outcome.workspace.fields) {
+      expect(field.field.length).toBeLessThanOrEqual(30);
+    }
+    expect(new Set(outcome.workspace.fields.map((f) => f.field)).size).toBe(2);
+  });
+
+  it('does not rename onto a name that is already in use', () => {
+    let workspace = collidingWorkspace();
+    // A third field already holds the name the numbering would otherwise reach for.
+    workspace = addDrawnFeature(workspace, square(2.7, 48.8));
+    workspace = combineIntoField(workspace, [workspace.features[2].id]);
+    workspace = updateField(workspace, workspace.fields[2].id, {
+      client: 'Acme',
+      farm: 'Home',
+      field: 'Long Acre (2)',
+    });
+
+    const flag = runChecks(workspace).find((f) => f.kind === 'duplicate-name')!;
+    const outcome = autoUniquifyNames(workspace, flag.fieldIds);
+    const names = outcome.workspace.fields.map((f) => f.field);
+
+    expect(new Set(names).size).toBe(names.length);
+    expect(runChecks(outcome.workspace).map((f) => f.kind)).not.toContain('duplicate-name');
+  });
+
+  it('clears once the user combines them into one field instead', () => {
+    const workspace = collidingWorkspace();
+    const flag = runChecks(workspace).find((f) => f.kind === 'duplicate-name')!;
+    // The other resolution: they really were one field farmed in two blocks.
+    const combined = combineIntoField(workspace, flag.featureIds, workspace.fields[0].id);
+
+    expect(runChecks(combined).map((f) => f.kind)).not.toContain('duplicate-name');
+    expect(planExport(combined).rows).toHaveLength(1);
+    expect(planExport(combined).rows[0].geometry.coordinates).toHaveLength(2);
   });
 });
 
@@ -230,25 +341,35 @@ describe('bulk attribute editing', () => {
 });
 
 describe('attribute mapping on import', () => {
-  it('groups features that share the mapped attributes into one field', async () => {
+  it('gives every named polygon a field of its own', async () => {
     const report = await importFiles([fileFrom('fields.kml', KML_DOC)]);
-    const workspace = addImported(emptyWorkspace(), report.features, {
-      client: true,
-      farm: true,
-      field: true,
-    });
+    const workspace = addImported(emptyWorkspace(), report.features, KML_COLUMNS);
     // Church Field carries all three; Two Halves carries only a name.
     expect(workspace.fields).toHaveLength(2);
     expect(workspace.features.every((f) => f.fieldId !== null)).toBe(true);
   });
 
+  it('never merges two polygons just because they share a name', () => {
+    const same = { Client: 'Acme', Farm: 'Home', Field: 'Long Acre' };
+    const workspace = addImported(
+      emptyWorkspace(),
+      [
+        { geometry: square(2.5, 48.8), source: 'a.zip', sourceProps: same },
+        { geometry: square(2.6, 48.8), source: 'a.zip', sourceProps: same },
+      ],
+      { client: 'Client', farm: 'Farm', field: 'Field' },
+    );
+
+    // Two blocks with one name are two fields whose names collide, not one field in
+    // two pieces. Merging them would drop a boundary the user never agreed to lose.
+    expect(workspace.fields).toHaveLength(2);
+    expect(new Set(workspace.features.map((f) => f.fieldId)).size).toBe(2);
+    expect(planExport(workspace).rows).toHaveLength(2);
+  });
+
   it('leaves everything ungrouped when no mapping is requested', async () => {
     const report = await importFiles([fileFrom('fields.kml', KML_DOC)]);
-    const workspace = addImported(emptyWorkspace(), report.features, {
-      client: false,
-      farm: false,
-      field: false,
-    });
+    const workspace = addImported(emptyWorkspace(), report.features, NO_COLUMNS);
     expect(workspace.fields).toHaveLength(0);
     expect(workspace.features.every((f) => f.fieldId === null)).toBe(true);
   });
@@ -514,11 +635,7 @@ describe('end-to-end: mixed import to CropForce zip', () => {
     expect(report.errors).toEqual([]);
     expect(report.features).toHaveLength(4);
 
-    let workspace = addImported(emptyWorkspace(), report.features, {
-      client: false,
-      farm: false,
-      field: false,
-    });
+    let workspace = addImported(emptyWorkspace(), report.features, NO_COLUMNS);
 
     // One field built from polygons that came out of three different files. The KMZ
     // contributes two features, one of which is itself a two-part multipolygon.
