@@ -7,6 +7,20 @@ Load KML, KMZ, zipped shapefiles and GeoJSON — as many at once as you like —
 polygons into fields, clean them up against the boundary criteria, and export one merged
 shapefile with one row per field.
 
+## Languages
+
+English, Portuguese (Brazil) and Spanish (Latin America). The picker sits in the header;
+a fresh tab starts in whichever of the three your browser asks for and falls back to
+English. The choice is not remembered anywhere — this app stores nothing at all, and a
+saved preference would be the first exception to that.
+
+Everything the interface says is translated, including the quality flags and the notes
+the file readers produce. Three words are deliberately left in English wherever they name
+the exported column: `Client`, `Farm` and `Field` are what the shapefile header actually
+says, and translating them would send someone looking for a column that does not exist.
+Areas and other numbers are formatted for the chosen locale, so a hectare figure reads
+`12,34` in Portuguese and `12.34` in English.
+
 ## Everything stays on your machine
 
 There is no backend. No server, no database, no serverless functions, no analytics, no
@@ -63,11 +77,18 @@ call anything.
    Field names stay per-row, because each one names a different field.
 4. **Work from the report.** The counts in the quality panel are buttons: click
    "2 blocking" to select every polygon behind those flags and frame them on the map,
-   or click a single flag's title to go straight to that one.
+   or click a single flag's title to go straight to that one. The field list has a
+   matching filter row — All, Any issue, Blocking, To review, Clean — so a long list can
+   be cut down to the rows that still need work.
 5. **Clean and fix.** The quality panel checks each field and offers two routes for
    every flag: an automatic correction, or a manual one that selects the offending
    geometry and arms the right editing tool. Everything, auto-fixes included, is one
-   Ctrl+Z away from being undone.
+   Ctrl+Z away from being undone. A warning you have looked at and are happy with can be
+   marked reviewed: it drops out of the working list into a collapsed "reviewed" section,
+   stops counting against the "To review" filter, and can be put back with **Un-review**.
+   Reviewing is a note about what you have read rather than a change to the boundaries,
+   so it sits outside the undo history — and if the geometry behind a reviewed warning
+   changes, the flag comes back to be looked at again.
 6. **Export.** One button produces one `.zip` containing `.shp`, `.shx`, `.dbf`, `.prj`
    and `.cpg`, in WGS84, with `Client`, `Farm` and `Field` as 30-character text columns.
 
@@ -119,7 +140,14 @@ fields, no overlaps, consistent naming — so the tool doubles as guidance.
 ## Editing tools
 
 Draw, vertex edit, move, cut exclusion zones, split with a drawn line, merge, smooth with
-a live preview, and delete. Optional snapping keeps neighbouring fields meeting exactly.
+a live preview, and delete.
+
+**Snapping** is the checkbox under the toolbar. While you are drawing or dragging a
+vertex, a point that comes within about 18 pixels of an existing boundary jumps onto it
+exactly, so two neighbouring fields share an edge instead of leaving a hairline gap or a
+sliver of overlap between them — which is what the overlap check would otherwise flag. It
+does nothing at all when you are not drawing or editing, and it can be turned off when you
+want a vertex to land exactly where you put it.
 The map carries a zoom-to-my-location button and a go-to-coordinates button beside it,
 for when the boundaries you have been sent are somewhere you need to find.
 
@@ -182,3 +210,8 @@ the tests round-trip real output back through a shapefile reader to prove it.
 Vite, React, TypeScript, Tailwind. Leaflet with Leaflet-Geoman for editing, Turf for
 geometry, proj4 for reprojection, shpjs and @tmcw/togeojson for reading, JSZip for
 archives. All of it runs in the browser.
+
+Interface text lives in `src/i18n`. `en.ts` is the canonical table and every other
+language is typed against it, so a missing or misspelled key is a compile error rather
+than an English word appearing unannounced in the middle of a translated screen; a test
+checks that the tables agree on their keys and on the placeholders inside each string.

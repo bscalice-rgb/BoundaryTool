@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useT } from '../i18n';
 
 /* -------------------------------------------------------------------------- */
 /* Buttons                                                                     */
@@ -56,13 +57,15 @@ export function Button({
  * boundary criteria next to the check each one belongs to, so the tool explains
  * the standard while it enforces it.
  */
-export function InfoDot({ text, label = 'What this checks' }: { text: string; label?: string }) {
+export function InfoDot({ text, label }: { text: string; label?: string }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
+  const heading = label ?? t('ui.whatThisChecks');
   return (
     <span className="relative inline-flex">
       <button
         type="button"
-        aria-label={label}
+        aria-label={heading}
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={() => setOpen(false)}
         onFocus={() => setOpen(true)}
@@ -80,7 +83,7 @@ export function InfoDot({ text, label = 'What this checks' }: { text: string; la
           className="absolute right-0 top-5 z-1000 w-64 rounded-md border border-ink-600
             bg-ink-950 p-2.5 text-[11px] leading-relaxed font-normal text-ink-300 shadow-xl"
         >
-          <span className="mb-1 block font-semibold text-ink-100">{label}</span>
+          <span className="mb-1 block font-semibold text-ink-100">{heading}</span>
           {text}
         </span>
       )}
@@ -129,6 +132,7 @@ export function Modal({
   onClose: () => void;
   width?: string;
 }) {
+  const t = useT();
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -164,7 +168,7 @@ export function Modal({
           <button
             type="button"
             onClick={onClose}
-            aria-label={`Close ${title}`}
+            aria-label={t('ui.close', { title })}
             className="ml-auto rounded p-1 text-ink-400 hover:bg-ink-800 hover:text-ink-100"
           >
             <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8">

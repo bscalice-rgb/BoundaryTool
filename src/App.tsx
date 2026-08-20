@@ -10,6 +10,8 @@ import type {
   WFeature,
   WField,
 } from './types';
+import { useT } from './i18n';
+import LanguagePicker from './components/LanguagePicker';
 import { useWorkspaceHistory } from './state/history';
 import {
   addDrawnFeature,
@@ -37,6 +39,7 @@ import {
   autoSimplify,
   autoUniquifyNames,
   resolveOverlap,
+  reviewKey,
   runChecks,
 } from './lib/qa';
 import {
@@ -63,7 +66,11 @@ import { ToastStack, type Toast } from './components/ui';
 
 const ACCEPTED = '.kml,.kmz,.zip,.geojson,.json,.shp,.shx,.dbf,.prj,.cpg';
 
+const messageOf = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
 export default function App() {
+  const t = useT();
   const history = useWorkspaceHistory();
   const { workspace, apply } = history;
 
@@ -90,6 +97,11 @@ export default function App() {
   const [goTo, setGoTo] = useState<{ position: Position; nonce: number } | null>(null);
   /** Non-null while the browser is being asked for a position. */
   const [locating, setLocating] = useState<string | null>(null);
+  /**
+   * Warnings the user has looked at and waved through. Kept outside the undo history on
+   * purpose: this is a note about what has been read, not a change to the boundaries.
+   */
+  const [reviewed, setReviewed] = useState<ReadonlySet<string>>(new Set());
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nonceRef = useRef(0);
@@ -107,7 +119,7 @@ export default function App() {
   // QA runs against a deferred copy so a long check pass never blocks typing in the
   // attribute table; the map and the table always show the live workspace.
   const deferredWorkspace = useDeferredValue(workspace);
-  const flags = useMemo<QAFlag[]>(() => runChecks(deferredWorkspace), [deferredWorkspace]);
+  const flags = useMemo<QAFlag[]>(() => runChecks(deferredWorkspace, t), [deferredWorkspace, t]);
 
   const colorByField = useMemo(() => {
     const map = new Map<FieldId, string>();
@@ -177,17 +189,17 @@ export default function App() {
       try {
         const report = await importFiles(files);
         if (report.features.length === 0 && report.errors.length === 0) {
-          toast('Nothing to import: no polygons were found in those files.', 'error');
+          toast(t('import.nothing'), 'error');
           return;
         }
         setPendingImport(report);
       } catch (error) {
-        toast(`Import failed: ${error instanceof Error ? error.message : String(error)}`, 'error');
+        toast(t('import.failed', { message: messageOf(error) }), 'error');
       } finally {
         setBusy(false);
       }
     },
-    [toast],
+    [toast, t],
   );
 
   const confirmImport = useCallback(
@@ -195,12 +207,12 @@ export default function App() {
       const report = pendingImport;
       if (!report) return;
       setPendingImport(null);
-      apply(`Import ${report.features.length} polygons`, (current) =>
+      apply(t('action.import', { count: report.features.length }), (current) =>
         addImported(current, report.features, mapping),
       );
-      toast(`Added ${report.features.length} polygons to the workspace.`);
+      toast(t.n('import.added', report.features.length));
     },
-    [pendingImport, apply, toast],
+    [pendingImport, apply, toast, t],
   );
 
   // Files dropped anywhere on the window, not just on a target the user has to find.
@@ -241,27 +253,27 @@ export default function App() {
 
   const handleDrawPolygon = useCallback(
     (geometry: Polygon) => {
-      apply('Draw polygon', (current) => addDrawnFeature(current, geometry));
+      apply(t('action.draw'), (current) => addDrawnFeature(current, geometry));
     },
-    [apply],
+    [apply, t],
   );
 
   const handleCutHole = useCallback(
     (hole: Polygon) => {
       const next = cutExclusionZone(workspace, hole, selection);
       if (next === workspace) {
-        toast('That shape does not overlap any polygon, so nothing was cut.', 'error');
+        toast(t('toast.cutNothing'), 'error');
         return;
       }
-      apply('Cut exclusion zone', () => next);
+      apply(t('action.cutHole'), () => next);
     },
-    [apply, workspace, selection, toast],
+    [apply, workspace, selection, toast, t],
   );
 
   const handleSplitLine = useCallback(
     (line: LineString) => {
       if (selectedFeatures.length === 0) {
-        toast('Select the polygon to split first.', 'error');
+        toast(t('toast.splitSelect'), 'error');
         return;
       }
       // The split is worked out here rather than inside the history action, because the
@@ -276,22 +288,22 @@ export default function App() {
       }
 
       if (splitCount === 0) {
-        toast('The line did not cut cleanly through the selected polygon.', 'error');
+        toast(t('toast.splitNone'), 'error');
         return;
       }
-      apply(`Split ${splitCount} polygon${splitCount === 1 ? '' : 's'}`, () => next);
+      apply(t('action.split', { count: splitCount }), () => next);
       setSelection(new Set());
       setTool('select');
-      toast(`Split ${splitCount} polygon${splitCount === 1 ? '' : 's'}.`);
+      toast(t.n('toast.splitDone', splitCount));
     },
-    [apply, workspace, selectedFeatures, toast],
+    [apply, workspace, selectedFeatures, toast, t],
   );
 
   const handleGeometryEdited = useCallback(
     (featureId: FeatureId, geometry: PolyGeom) => {
-      apply('Edit geometry', (current) => setGeometry(current, featureId, geometry));
+      apply(t('action.editGeometry'), (current) => setGeometry(current, featureId, geometry));
     },
-    [apply],
+    [apply, t],
   );
 
   /* ------------------------------------------------------ selection actions */
@@ -299,38 +311,38 @@ export default function App() {
   const deleteSelection = useCallback(() => {
     if (selection.size === 0) return;
     const ids = [...selection];
-    apply(`Delete ${ids.length} polygon${ids.length === 1 ? '' : 's'}`, (current) =>
+    apply(t('action.deletePolygons', { count: ids.length }), (current) =>
       deleteFeatures(current, ids),
     );
     setSelection(new Set());
-  }, [apply, selection]);
+  }, [apply, selection, t]);
 
   const mergeSelection = useCallback(() => {
     const ids = [...selection];
     if (ids.length < 2) return;
-    apply('Merge polygons', (current) => mergeFeatures(current, ids));
+    apply(t('action.mergePolygons'), (current) => mergeFeatures(current, ids));
     setSelection(new Set());
-    toast('Merged the selected polygons into one.');
-  }, [apply, selection, toast]);
+    toast(t('toast.merged'));
+  }, [apply, selection, toast, t]);
 
   const combineSelection = useCallback(() => {
     const ids = [...selection];
     if (ids.length === 0) return;
-    apply(`Combine ${ids.length} polygon${ids.length === 1 ? '' : 's'} into a field`, (current) =>
+    apply(t('action.combine', { count: ids.length }), (current) =>
       combineIntoField(current, ids),
     );
-    toast('Created a field. Fill in Client, Farm and Field to make it exportable.');
-  }, [apply, selection, toast]);
+    toast(t('toast.combined'));
+  }, [apply, selection, toast, t]);
 
   const assignSelection = useCallback(
     (fieldId: FieldId | null) => {
       const ids = [...selection];
       if (ids.length === 0) return;
-      apply(fieldId ? 'Move polygons to field' : 'Remove polygons from field', (current) =>
+      apply(t(fieldId ? 'action.moveToField' : 'action.removeFromField'), (current) =>
         assignToField(current, ids, fieldId),
       );
     },
-    [apply, selection],
+    [apply, selection, t],
   );
 
   /* -------------------------------------------------------------- QA fixes */
@@ -352,23 +364,23 @@ export default function App() {
 
       const outcome =
         spec.kind === 'unkink'
-          ? autoFixGeometry(workspace, flag.featureIds)
+          ? autoFixGeometry(workspace, flag.featureIds, t)
           : spec.kind === 'delete-features'
-            ? autoDeleteFeatures(workspace, flag.featureIds)
+            ? autoDeleteFeatures(workspace, flag.featureIds, t)
             : spec.kind === 'uniquify-names'
-              ? autoUniquifyNames(workspace, flag.fieldIds)
+              ? autoUniquifyNames(workspace, flag.fieldIds, t)
               : spec.kind === 'shorten-names'
-                ? autoShortenNames(workspace, flag.fieldIds)
-                : autoSimplify(workspace, flag.featureIds, spec.toleranceMeters);
+                ? autoShortenNames(workspace, flag.fieldIds, t)
+                : autoSimplify(workspace, flag.featureIds, spec.toleranceMeters, t);
 
       if (!outcome.ok) {
         toast(outcome.message, 'error');
         return;
       }
-      apply(`Auto-fix: ${flag.title}`, () => outcome.workspace);
-      toast(`${outcome.message} Ctrl+Z undoes it.`);
+      apply(t('action.autoFix', { title: flag.title }), () => outcome.workspace);
+      toast(t('toast.undoHint', { message: outcome.message }));
     },
-    [apply, workspace, toast],
+    [apply, workspace, toast, t],
   );
 
   /** Selects every polygon behind the given flags and frames them on the map. */
@@ -378,7 +390,7 @@ export default function App() {
         workspace.features.some((feature) => feature.id === id),
       );
       if (ids.length === 0) {
-        toast('Those flags are about field rows rather than polygons on the map.', 'error');
+        toast(t('toast.flagsWithoutPolygons'), 'error');
         return;
       }
       setActiveFlagId(chosen.length === 1 ? chosen[0].id : null);
@@ -386,7 +398,7 @@ export default function App() {
       zoomTo(ids);
       setTool('select');
     },
-    [workspace.features, zoomTo, toast],
+    [workspace.features, zoomTo, toast, t],
   );
 
   const handleFixManually = useCallback(
@@ -437,15 +449,15 @@ export default function App() {
   const handleResolveOverlap = useCallback(
     (keeperId: string, loserId: string) => {
       setOverlapPair(null);
-      const outcome = resolveOverlap(workspace, keeperId, loserId);
+      const outcome = resolveOverlap(workspace, keeperId, loserId, t);
       if (!outcome.ok) {
         toast(outcome.message, 'error');
         return;
       }
-      apply('Auto-fix: clip overlap', () => outcome.workspace);
-      toast(`${outcome.message} Ctrl+Z undoes it.`);
+      apply(t('action.clipOverlap'), () => outcome.workspace);
+      toast(t('toast.undoHint', { message: outcome.message }));
     },
-    [apply, workspace, toast],
+    [apply, workspace, toast, t],
   );
 
   /* ------------------------------------------------------------- smoothing */
@@ -471,15 +483,15 @@ export default function App() {
   const applySmoothing = useCallback(() => {
     const ids = [...selection];
     if (ids.length === 0) return;
-    const outcome = autoSimplify(workspace, ids, tolerance);
+    const outcome = autoSimplify(workspace, ids, tolerance, t);
     if (!outcome.ok) {
-      toast('Nothing to smooth at that tolerance.', 'error');
+      toast(t('toast.smoothNothing'), 'error');
       return;
     }
-    apply(`Smooth at ${tolerance} m`, () => outcome.workspace);
+    apply(t('action.smooth', { tolerance }), () => outcome.workspace);
     setTool('select');
     toast(outcome.message);
-  }, [apply, selection, tolerance, workspace, toast]);
+  }, [apply, selection, tolerance, workspace, toast, t]);
 
   /* ---------------------------------------------------------------- export */
 
@@ -490,12 +502,18 @@ export default function App() {
     // the gate itself: someone who fills in the last attribute and immediately clicks
     // export must not be told they are still blocked. So the checks run fresh here,
     // against the live workspace, and the answer is held for as long as the dialog is up.
-    setExportStatus(exportBlockers(runChecks(workspace), planExport(workspace)));
+    setExportStatus(
+      exportBlockers(
+        runChecks(workspace, t).filter((flag) => !reviewed.has(reviewKey(flag))),
+        planExport(workspace),
+        t,
+      ),
+    );
     // The suggested name is re-derived on each open, because the client name it is built
     // from is usually typed in after the first, blocked, attempt to export.
     if (!fileNameEdited) setFileName(suggestFileName(workspace));
     setExportOpen(true);
-  }, [workspace, fileNameEdited]);
+  }, [workspace, fileNameEdited, reviewed, t]);
 
   const downloadExport = useCallback(async () => {
     try {
@@ -503,11 +521,11 @@ export default function App() {
       const blob = await buildExportZip(plan, base);
       downloadBlob(blob, `${base}.zip`);
       setExportOpen(false);
-      toast(`Downloaded ${base}.zip with ${plan.rows.length} field rows.`);
+      toast(t('export.done', { name: `${base}.zip`, count: plan.rows.length }));
     } catch (error) {
-      toast(`Export failed: ${error instanceof Error ? error.message : String(error)}`, 'error');
+      toast(t('export.failed', { message: messageOf(error) }), 'error');
     }
-  }, [fileName, plan, toast]);
+  }, [fileName, plan, toast, t]);
 
   /* ------------------------------------------------------------- shortcuts */
 
@@ -580,21 +598,21 @@ export default function App() {
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-11 shrink-0 items-center gap-3 border-b border-ink-800 bg-ink-900 px-3">
-        <h1 className="text-sm font-semibold text-ink-100">CropForce Boundary Prep</h1>
+        <h1 className="text-sm font-semibold text-ink-100">{t('app.title')}</h1>
         <span
           className="hidden items-center gap-1.5 rounded-full border border-ink-700 bg-ink-950
             px-2.5 py-1 text-[10px] text-ink-300 sm:inline-flex"
-          title="No server, no database, no analytics. Refreshing this page discards everything."
+          title={t('app.privacyTooltip')}
         >
           <svg viewBox="0 0 16 16" className="h-3 w-3 text-crop-400" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M8 1.5l5 2v4c0 3-2.2 5.7-5 7-2.8-1.3-5-4-5-7v-4z" />
             <path d="M5.8 8l1.6 1.6L10.4 6.5" strokeLinecap="round" />
           </svg>
-          Files are processed only in your browser. Nothing is uploaded or stored.
+          {t('app.privacy')}
         </span>
 
         <div className="ml-auto flex items-center gap-1.5">
-          {busy && <span className="text-[11px] text-ink-400">Reading files…</span>}
+          {busy && <span className="text-[11px] text-ink-400">{t('app.reading')}</span>}
           <HistoryButtons
             canUndo={history.canUndo}
             canRedo={history.canRedo}
@@ -620,17 +638,18 @@ export default function App() {
             className="rounded-md border border-ink-700 bg-ink-800 px-2.5 py-1.5 text-xs
               text-ink-100 hover:bg-ink-700"
           >
-            Add files
+            {t('app.addFiles')}
           </button>
           <button
             type="button"
             disabled={isEmpty}
             onClick={() => {
-              if (!window.confirm('Discard everything in the workspace? This cannot be undone.')) {
+              if (!window.confirm(t('app.clearConfirm'))) {
                 return;
               }
               history.clear();
               setSelection(new Set());
+              setReviewed(new Set());
               setTool('select');
               setFileName('');
               setFileNameEdited(false);
@@ -638,8 +657,9 @@ export default function App() {
             className="rounded-md border border-transparent px-2.5 py-1.5 text-xs text-ink-400
               hover:bg-ink-800 hover:text-ink-100 disabled:opacity-40"
           >
-            Clear
+            {t('app.clear')}
           </button>
+          <LanguagePicker />
         </div>
       </header>
 
@@ -650,33 +670,33 @@ export default function App() {
             selection={selection}
             flags={flags}
             attributeFocus={attributeFocus}
+            reviewed={reviewed}
             onSelectFeature={selectOne}
             onSelectMany={selectMany}
             onUpdateField={(id, patch) =>
-              apply('Edit attributes', (current) => updateField(current, id, patch))
+              apply(t('action.editAttributes'), (current) => updateField(current, id, patch))
             }
             onBulkUpdateFields={(ids, patch) => {
-              const columns = Object.keys(patch).join(' and ');
-              apply(`Set ${columns} on ${ids.length} fields`, (current) =>
+              const columns = Object.keys(patch)
+                .map((key) => t(`fields.${key as 'client' | 'farm' | 'field'}` as const))
+                .join(t('fix.and'));
+              apply(t('action.bulkNaming', { columns, count: ids.length }), (current) =>
                 updateFields(current, ids, patch),
               );
-              toast(`Applied ${columns} to ${ids.length} field${ids.length === 1 ? '' : 's'}.`);
+              toast(t.n('toast.bulkApplied', ids.length, { columns }));
             }}
             onCombine={combineSelection}
             onAssign={assignSelection}
             onUngroupField={(id) =>
-              apply('Ungroup field', (current) => ungroupField(current, id))
+              apply(t('action.ungroupField'), (current) => ungroupField(current, id))
             }
             onDeleteField={(id) => {
-              const keepPolygons = !window.confirm(
-                'Delete this field and its polygons?\n\n' +
-                  'OK deletes both. Cancel keeps the polygons and only removes the field row.',
-              );
-              apply('Delete field', (current) => deleteField(current, id, !keepPolygons));
+              const keepPolygons = !window.confirm(t('fields.deleteFieldConfirm'));
+              apply(t('action.deleteField'), (current) => deleteField(current, id, !keepPolygons));
             }}
             onDeleteSelection={deleteSelection}
             onMergeSelection={mergeSelection}
-            onNewField={() => apply('Add field', createEmptyField)}
+            onNewField={() => apply(t('action.addField'), createEmptyField)}
             onZoomToFeatures={zoomTo}
           />
         </aside>
@@ -752,7 +772,7 @@ export default function App() {
               <div className="pointer-events-none absolute inset-0 z-1400 grid place-items-center
                 border-4 border-dashed border-crop-400 bg-ink-950/70">
                 <p className="rounded-lg bg-ink-900 px-5 py-3 text-sm text-ink-100 shadow-xl">
-                  Drop boundary files to load them
+                  {t('empty.dropOverlay')}
                 </p>
               </div>
             )}
@@ -767,6 +787,17 @@ export default function App() {
             onAutoFix={handleAutoFix}
             onFixManually={handleFixManually}
             onSelectFlagged={handleSelectFlagged}
+            reviewed={reviewed}
+            onReview={(flag) =>
+              setReviewed((current) => new Set(current).add(reviewKey(flag)))
+            }
+            onUnreview={(flag) =>
+              setReviewed((current) => {
+                const next = new Set(current);
+                next.delete(reviewKey(flag));
+                return next;
+              })
+            }
             onExport={openExport}
           />
         </aside>
@@ -795,7 +826,7 @@ export default function App() {
             nonceRef.current += 1;
             setGoTo({ position, nonce: nonceRef.current });
             setCoordinatesOpen(false);
-            toast(`Moved the map to ${formatLatLon(position)}.`);
+            toast(t('coords.moved', { value: formatLatLon(position) }));
           }}
           onClose={() => setCoordinatesOpen(false)}
         />

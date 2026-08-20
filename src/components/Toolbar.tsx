@@ -1,12 +1,15 @@
 import type { ReactNode } from 'react';
 import type { Basemap, Tool } from '../types';
+import { useT } from '../i18n';
+import type { StringKey } from '../i18n';
+import { formatHa, formatNum } from '../lib/geo';
 import { Button, InfoDot } from './ui';
 
 export interface ToolSpec {
   id: Tool;
-  label: string;
+  labelKey: StringKey;
   shortcut: string;
-  hint: string;
+  hintKey: StringKey;
   /** Tools that act on a selection are disabled until there is one. */
   needsSelection?: boolean;
   icon: ReactNode;
@@ -15,16 +18,16 @@ export interface ToolSpec {
 export const TOOLS: ToolSpec[] = [
   {
     id: 'select',
-    label: 'Select',
+    labelKey: 'tool.select',
     shortcut: 'V',
-    hint: 'Click a polygon to select it. Shift-click to add to the selection.',
+    hintKey: 'tool.select.hint',
     icon: <path d="M3 2l9 5-4 1.2L6.6 12z" />,
   },
   {
     id: 'edit',
-    label: 'Vertices',
+    labelKey: 'tool.edit',
     shortcut: 'E',
-    hint: 'Drag a vertex to move it, click the midpoint markers to add one, right-click a vertex to delete it.',
+    hintKey: 'tool.edit.hint',
     needsSelection: true,
     icon: (
       <>
@@ -37,27 +40,24 @@ export const TOOLS: ToolSpec[] = [
   },
   {
     id: 'move',
-    label: 'Move',
+    labelKey: 'tool.move',
     shortcut: 'M',
-    hint: 'Drag the whole polygon without changing its shape.',
+    hintKey: 'tool.move.hint',
     needsSelection: true,
     icon: <path d="M8 2v12M2 8h12M8 2L6 4M8 2l2 2M8 14l-2-2M8 14l2-2M2 8l2-2M2 8l2 2M14 8l-2-2M14 8l-2 2" />,
   },
   {
     id: 'draw',
-    label: 'Draw',
+    labelKey: 'tool.draw',
     shortcut: 'D',
-    hint: 'Click to place each vertex, then double-click or click the first vertex again to close the polygon.',
+    hintKey: 'tool.draw.hint',
     icon: <path d="M2 8l4-5 8 2-2 8-8 1z" />,
   },
   {
     id: 'cut-hole',
-    label: 'Cut hole',
+    labelKey: 'tool.cutHole',
     shortcut: 'H',
-    hint:
-      'Draw around an area to exclude it — a tree island, a track, a watercourse, a turbine ' +
-      'pad. Double-click to close the shape; anything it covers is cut out of the polygons ' +
-      'underneath, or out of the selected polygons only when there is a selection.',
+    hintKey: 'tool.cutHole.hint',
     icon: (
       <>
         <path d="M2 2h12v12H2z" />
@@ -67,9 +67,9 @@ export const TOOLS: ToolSpec[] = [
   },
   {
     id: 'split',
-    label: 'Split',
+    labelKey: 'tool.split',
     shortcut: 'S',
-    hint: 'Draw a line across the selected polygon to cut it in two. Double-click to finish the line.',
+    hintKey: 'tool.split.hint',
     needsSelection: true,
     icon: (
       <>
@@ -80,9 +80,9 @@ export const TOOLS: ToolSpec[] = [
   },
   {
     id: 'simplify',
-    label: 'Smooth',
+    labelKey: 'tool.simplify',
     shortcut: 'G',
-    hint: 'Reduce vertex noise with a live preview before anything is committed.',
+    hintKey: 'tool.simplify.hint',
     needsSelection: true,
     icon: <path d="M2 11c3 0 3-6 6-6s3 6 6 6" />,
   },
@@ -103,7 +103,9 @@ export interface ToolbarProps {
 }
 
 export default function Toolbar(props: ToolbarProps) {
+  const t = useT();
   const active = TOOLS.find((tool) => tool.id === props.tool);
+  const activeHint = active ? t(active.hintKey) : '';
 
   return (
     <div className="flex shrink-0 flex-col border-b border-ink-800 bg-ink-900">
@@ -119,7 +121,7 @@ export default function Toolbar(props: ToolbarProps) {
               type="button"
               disabled={disabled}
               onClick={() => props.onToolChange(spec.id)}
-              title={`${spec.label} (${spec.shortcut}) — ${spec.hint}`}
+              title={`${t(spec.labelKey)} (${spec.shortcut}) — ${t(spec.hintKey)}`}
               className={`flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-xs transition-colors
                 disabled:cursor-not-allowed disabled:opacity-35
                 focus:outline-none focus-visible:ring-2 focus-visible:ring-crop-400
@@ -140,7 +142,7 @@ export default function Toolbar(props: ToolbarProps) {
               >
                 {spec.icon}
               </svg>
-              {spec.label}
+              {t(spec.labelKey)}
             </button>
           );
         })}
@@ -150,25 +152,25 @@ export default function Toolbar(props: ToolbarProps) {
         <Button
           onClick={props.onMergeSelection}
           disabled={props.selectionCount < 2}
-          title="Merge the selected polygons into one (they should be adjacent or overlapping)"
+          title={t('toolbar.mergeHint')}
           className="px-2"
         >
           <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
             <path d="M2 3h7v7H2zM7 6h7v7H7z" strokeLinejoin="round" />
           </svg>
-          <span className="sr-only">Merge selected polygons</span>
+          <span className="sr-only">{t('toolbar.merge')}</span>
         </Button>
         <Button
           tone="danger"
           onClick={props.onDeleteSelection}
           disabled={!props.hasSelection}
-          title="Delete the selected polygons (Del)"
+          title={t('toolbar.deleteHint')}
           className="px-2"
         >
           <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
             <path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.5 6.5v5M9.5 6.5v5" strokeLinejoin="round" />
           </svg>
-          <span className="sr-only">Delete selected polygons</span>
+          <span className="sr-only">{t('toolbar.delete')}</span>
         </Button>
         </div>
 
@@ -178,18 +180,14 @@ export default function Toolbar(props: ToolbarProps) {
               key={option}
               type="button"
               onClick={() => props.onBasemapChange(option)}
-              title={
-                option === 'imagery'
-                  ? 'Esri World Imagery — the layer to trace boundaries against'
-                  : 'OpenStreetMap — roads and place names for context'
-              }
+              title={t(option === 'imagery' ? 'toolbar.imageryHint' : 'toolbar.streetHint')}
               className={`px-2.5 py-1.5 text-xs transition-colors ${
                 props.basemap === option
                   ? 'bg-ink-700 text-ink-100'
                   : 'bg-ink-850 text-ink-400 hover:text-ink-100'
               }`}
             >
-              {option === 'imagery' ? 'Imagery' : 'Street'}
+              {t(option === 'imagery' ? 'toolbar.imagery' : 'toolbar.street')}
             </button>
           ))}
         </div>
@@ -197,16 +195,16 @@ export default function Toolbar(props: ToolbarProps) {
 
       <div className="flex items-center gap-3 border-t border-ink-850 bg-ink-950/60 px-3 py-1">
         <span className="min-w-0 flex-1 truncate text-[11px] text-ink-400">
-          {active ? active.hint : ''}
+          {activeHint}
         </span>
-        {active && <InfoDot text={active.hint} label={active.label} />}
+        {active && <InfoDot text={activeHint} label={t(active.labelKey)} />}
 
         {/* Snapping lives with the readouts rather than the actions: it is a mode that
             stays on across tools, not something you do once. */}
         <label
           className="flex shrink-0 cursor-pointer items-center gap-1.5 text-[11px] text-ink-400
             hover:text-ink-100"
-          title="Snap vertices to nearby boundaries while drawing and editing, so neighbouring fields meet exactly"
+          title={t('toolbar.snappingHint')}
         >
           <input
             type="checkbox"
@@ -214,13 +212,16 @@ export default function Toolbar(props: ToolbarProps) {
             onChange={(event) => props.onSnappingChange(event.target.checked)}
             className="h-3 w-3 accent-crop-500"
           />
-          Snapping
+          {t('toolbar.snapping')}
         </label>
 
         <span className="shrink-0 text-[11px] tabular-nums text-ink-300">
           {props.selectionCount > 0
-            ? `${props.selectionCount} selected · ${props.selectionAreaHa.toFixed(2)} ha`
-            : 'Nothing selected'}
+            ? t('toolbar.selected', {
+                count: props.selectionCount,
+                area: formatHa(props.selectionAreaHa),
+              })
+            : t('toolbar.nothingSelected')}
         </span>
       </div>
     </div>
@@ -266,25 +267,22 @@ export function HistoryButtons({
   onUndo: () => void;
   onRedo: () => void;
 }) {
+  const t = useT();
+  const undoTitle = undoLabel ? t('app.undo', { label: undoLabel }) : t('app.undoEmpty');
+  const redoTitle = redoLabel ? t('app.redo', { label: redoLabel }) : t('app.redoEmpty');
   return (
     <div className="flex items-center gap-1">
-      <Button onClick={onUndo} disabled={!canUndo} title={undoTitle(undoLabel)} className="px-2">
+      <Button onClick={onUndo} disabled={!canUndo} title={undoTitle} className="px-2">
         <HistoryArrow />
-        <span className="sr-only">Undo</span>
+        <span className="sr-only">{t('history.undo')}</span>
       </Button>
-      <Button onClick={onRedo} disabled={!canRedo} title={redoTitle(redoLabel)} className="px-2">
+      <Button onClick={onRedo} disabled={!canRedo} title={redoTitle} className="px-2">
         <HistoryArrow forward />
-        <span className="sr-only">Redo</span>
+        <span className="sr-only">{t('history.redo')}</span>
       </Button>
     </div>
   );
 }
-
-const undoTitle = (label: string | null) =>
-  label ? `Undo: ${label} (Ctrl+Z)` : 'Nothing to undo (Ctrl+Z)';
-
-const redoTitle = (label: string | null) =>
-  label ? `Redo: ${label} (Ctrl+Shift+Z)` : 'Nothing to redo (Ctrl+Shift+Z)';
 
 /* -------------------------------------------------------------------------- */
 /* Smoothing panel                                                             */
@@ -307,22 +305,15 @@ export function SmoothingPanel({
   onApply: () => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   return (
     <div
       className="absolute left-1/2 top-3 z-1000 w-96 -translate-x-1/2 rounded-lg border
         border-ink-600 bg-ink-900/97 p-3 shadow-2xl"
     >
       <div className="mb-2 flex items-center gap-2">
-        <h3 className="text-xs font-semibold text-ink-100">Smoothing preview</h3>
-        <InfoDot
-          label="Smoothing"
-          text={
-            'Boundaries traced from imagery or logged by GPS carry far more vertices than the ' +
-            'shape needs. Smoothing removes the noise without moving the boundary further than ' +
-            'the tolerance you set. The dashed outline is the result; nothing is committed until ' +
-            'you apply it.'
-          }
-        />
+        <h3 className="text-xs font-semibold text-ink-100">{t('smoothing.title')}</h3>
+        <InfoDot label={t('smoothing.label')} text={t('smoothing.guidance')} />
         <span className="ml-auto text-[11px] tabular-nums text-ink-300">{tolerance} m</span>
       </div>
 
@@ -334,42 +325,42 @@ export function SmoothingPanel({
         value={tolerance}
         onChange={(event) => onToleranceChange(Number(event.target.value))}
         className="w-full"
-        aria-label="Smoothing tolerance in metres"
+        aria-label={t('smoothing.tolerance')}
       />
 
       <dl className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
         <div>
-          <dt className="text-ink-400">Vertices</dt>
+          <dt className="text-ink-400">{t('smoothing.vertices')}</dt>
           <dd className="tabular-nums text-ink-100">
-            {verticesBefore} to {verticesAfter}
+            {t('smoothing.verticesValue', { before: verticesBefore, after: verticesAfter })}
           </dd>
         </div>
         <div>
-          <dt className="text-ink-400">Removed</dt>
+          <dt className="text-ink-400">{t('smoothing.removed')}</dt>
           <dd className="tabular-nums text-ink-100">
             {verticesBefore > 0
-              ? `${Math.round(((verticesBefore - verticesAfter) / verticesBefore) * 100)}%`
+              ? `${formatNum(((verticesBefore - verticesAfter) / verticesBefore) * 100)}%`
               : '0%'}
           </dd>
         </div>
         <div>
-          <dt className="text-ink-400">Area change</dt>
+          <dt className="text-ink-400">{t('smoothing.areaChange')}</dt>
           <dd
             className={`tabular-nums ${
               Math.abs(areaChangeHa) > 0.05 ? 'text-amber-300' : 'text-ink-100'
             }`}
           >
             {areaChangeHa >= 0 ? '+' : ''}
-            {areaChangeHa.toFixed(2)} ha
+            {formatHa(areaChangeHa)} ha
           </dd>
         </div>
       </dl>
 
       <div className="mt-3 flex gap-1.5">
         <Button tone="primary" onClick={onApply} disabled={tolerance <= 0} className="flex-1">
-          Apply smoothing
+          {t('smoothing.apply')}
         </Button>
-        <Button onClick={onCancel}>Cancel</Button>
+        <Button onClick={onCancel}>{t('smoothing.cancel')}</Button>
       </div>
     </div>
   );

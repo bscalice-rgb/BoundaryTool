@@ -1,4 +1,6 @@
 import type { MultiPolygon } from 'geojson';
+import { ambientT } from '../i18n/translator';
+import type { Translator } from '../i18n/translator';
 import type { QAFlag, WField, Workspace } from '../types';
 import { toMultiPolygon } from './geo';
 import { fieldGeometries } from './qa';
@@ -72,11 +74,15 @@ export interface ExportBlockers {
   warnings: string[];
 }
 
-export function exportBlockers(flags: QAFlag[], plan: ExportPlan): ExportBlockers {
+export function exportBlockers(
+  flags: QAFlag[],
+  plan: ExportPlan,
+  t: Translator = ambientT(),
+): ExportBlockers {
   const reasons = flags.filter((f) => f.severity === 'blocking').map((f) => f.title);
   const warnings = flags.filter((f) => f.severity === 'warning').map((f) => f.title);
   if (plan.rows.length === 0) {
-    reasons.unshift('There are no fields to export yet.');
+    reasons.unshift(t('export.noFields'));
   }
   return { blocked: reasons.length > 0, reasons, warnings };
 }

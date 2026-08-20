@@ -3,6 +3,8 @@ import L from 'leaflet';
 import '@geoman-io/leaflet-geoman-free';
 import type { BBox, LineString, Polygon, Position } from 'geojson';
 import type { Basemap, FeatureId, PolyGeom, Tool, WFeature, Workspace } from '../types';
+import { useT } from '../i18n';
+import type { Translator } from '../i18n';
 import { areaHa, formatHa } from '../lib/geo';
 
 const ESRI_IMAGERY =
@@ -39,10 +41,7 @@ function locateControl(onClick: () => void): L.Control {
     const link = L.DomUtil.create('a', '', container);
     link.href = '#';
     link.setAttribute('role', 'button');
-    link.setAttribute('aria-label', 'Zoom to my location');
-    link.title =
-      'Zoom to my location. Your browser asks you for permission first, and may consult ' +
-      'its own location service to answer. Your boundary data is never part of that.';
+    // Wording is filled in by the effect that follows the language picker.
     link.innerHTML =
       '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" ' +
       'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
@@ -72,20 +71,17 @@ async function permissionState(): Promise<PermissionState | null> {
  * Turns a geolocation failure into something worth reading. The browser's own message
  * ("position update is unavailable") tells a user nothing about what to do next.
  */
-function describeLocationError(event: L.ErrorEvent): string {
-  const detail = event.message ? ` (${event.message.replace(/^Geolocation error:\s*/i, '').replace(/\.$/, '')})` : '';
+function describeLocationError(event: L.ErrorEvent, t: Translator): string {
+  const detail = event.message
+    ? ` (${event.message.replace(/^Geolocation error:\s*/i, '').replace(/\.$/, '')})`
+    : '';
   switch (event.code) {
     case 1:
-      return 'Could not get your location: the browser blocked it. Allow location access ' +
-        'for this site in the address bar, then try again.';
+      return t('map.error.denied');
     case 3:
-      return 'Could not get your location: the browser did not answer in time. If it asked ' +
-        'for permission, accept the prompt and press the button again — the wait counts ' +
-        'against the request.';
+      return t('map.error.timeout');
     default:
-      return 'Could not get your location: your device could not work out where it is' +
-        `${detail}. A desktop without GPS relies on the browser's own location service, ` +
-        'which is often unavailable — pan the map to your fields instead.';
+      return t('map.error.unavailable', { detail });
   }
 }
 
@@ -96,12 +92,13 @@ function describeLocationError(event: L.ErrorEvent): string {
 function coordinateControl(onClick: () => void): L.Control {
   const control = new L.Control({ position: 'topleft' });
   control.onAdd = () => {
-    const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control map-icon-control');
+    const container = L.DomUtil.create(
+      'div',
+      'leaflet-bar leaflet-control map-icon-control coordinates-control',
+    );
     const link = L.DomUtil.create('a', '', container);
     link.href = '#';
     link.setAttribute('role', 'button');
-    link.setAttribute('aria-label', 'Go to coordinates');
-    link.title = 'Jump to a latitude and longitude, or a map link you have pasted';
     link.innerHTML =
       '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" ' +
       'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
@@ -143,6 +140,9 @@ export interface MapViewProps {
 }
 
 export default function MapView(props: MapViewProps) {
+  const t = useT();
+  const tRef = useRef(t);
+  tRef.current = t;
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const layersRef = useRef(new Map<FeatureId, L.Polygon>());
@@ -238,13 +238,11 @@ export default function MapView(props: MapViewProps) {
     locateControl(() => {
       void (async () => {
         if (!('geolocation' in navigator)) {
-          finishLocate('Could not get your location: this browser does not support geolocation.');
+          finishLocate(tRef.current('map.error.unsupported'));
           return;
         }
         if (!window.isSecureContext) {
-          finishLocate(
-            'Could not get your location: browsers only allow it over https:// or on localhost.',
-          );
+          finishLocate(tRef.current('map.error.insecure'));
           return;
         }
 
@@ -252,17 +250,12 @@ export default function MapView(props: MapViewProps) {
         // immediate answer or an accurate hint about what the browser is about to do.
         const state = await permissionState();
         if (state === 'denied') {
-          finishLocate(
-            'Could not get your location: this site is blocked from using it. Click the icon ' +
-              'at the left of the address bar, set Location to Allow, then try again.',
-          );
+          finishLocate(tRef.current('map.error.blocked'));
           return;
         }
         startLocate(
           false,
-          state === 'prompt'
-            ? 'Your browser is asking whether to share your location — choose Allow.'
-            : 'Asking your browser where you are…',
+          tRef.current(state === 'prompt' ? 'map.locatingPrompt' : 'map.locating'),
         );
       })();
     }).addTo(map);
@@ -299,10 +292,10 @@ export default function MapView(props: MapViewProps) {
       // not consult. A timeout must NOT escalate: on a laptop with no GPS, asking for high
       // accuracy is the surest way to turn "slow" into "impossible".
       if (locateAttemptRef.current === 'coarse' && event.code === 2) {
-        startLocate(true, 'Trying again with a more precise fix…');
+        startLocate(true, tRef.current('map.locatingPrecise'));
         return;
       }
-      finishLocate(describeLocationError(event));
+      finishLocate(describeLocationError(event, tRef.current));
     });
 
     map.pm.setGlobalOptions({ snappable: true, snapDistance: SNAP_DISTANCE });
@@ -507,6 +500,23 @@ export default function MapView(props: MapViewProps) {
       }
     }
   }, [props.tool, props.snapping, props.selection, props.workspace]);
+
+  /* ------------------------------------------------- control wording */
+
+  // The two icon controls are built once by Leaflet, so their wording is written in
+  // afterwards and rewritten whenever the language changes.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const describe = (selector: string, label: string, title: string) => {
+      const link = map.getContainer().querySelector<HTMLAnchorElement>(selector);
+      if (!link) return;
+      link.setAttribute('aria-label', label);
+      link.title = title;
+    };
+    describe('.locate-control a', t('map.locate'), t('map.locateHint'));
+    describe('.coordinates-control a', t('map.coordinates'), t('map.coordinatesHint'));
+  }, [t]);
 
   /* ------------------------------------------------------- simplify preview */
 

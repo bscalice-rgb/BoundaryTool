@@ -20,6 +20,8 @@ import {
   reprojectGeometry,
   reprojectorFromDef,
 } from './proj';
+import { ambientT } from '../i18n/translator';
+import type { StringKey } from '../i18n/translator';
 
 export interface ImportedFeature {
   geometry: PolyGeom;
@@ -114,16 +116,14 @@ async function importStandalone(file: File, report: ImportReport): Promise<void>
       return;
     }
     default:
-      report.errors.push(
-        `${file.name}: unsupported file type (.kml, .kmz, .zip, .geojson and .json are accepted).`,
-      );
+      report.errors.push(ambientT()('note.unsupported', { file: file.name }));
   }
 }
 
 function parseKmlText(text: string): FeatureCollection {
   const doc = new DOMParser().parseFromString(text, 'application/xml');
   if (doc.querySelector('parsererror')) {
-    throw new Error('the KML is not well-formed XML.');
+    throw new Error(ambientT()('note.badKml'));
   }
   return kml(doc) as FeatureCollection;
 }
@@ -138,11 +138,13 @@ async function parseKmz(
     (entry) => !entry.dir && extensionOf(entry.name) === 'kml' && !entry.name.includes('__MACOSX'),
   );
   if (kmlEntries.length === 0) {
-    throw new Error('no .kml file found inside the archive.');
+    throw new Error(ambientT()('note.noKmlInArchive'));
   }
   // A KMZ usually holds one doc.kml; if it holds several, all of them are read.
   if (kmlEntries.length > 1) {
-    report.notes.push(`${fileName}: merged ${kmlEntries.length} KML documents from the archive.`);
+    report.notes.push(
+      ambientT()('note.mergedKml', { file: fileName, count: kmlEntries.length }),
+    );
   }
   const collections = await Promise.all(
     kmlEntries.map(async (entry) => parseKmlText(await entry.async('text'))),
@@ -202,16 +204,18 @@ async function reportShapefileCrs(
 ): Promise<void> {
   const prj = entries.find((entry) => extensionOf(entry.name) === 'prj');
   if (!prj) {
-    report.notes.push(
-      `${fileName}: no .prj found — coordinates were read as WGS84. Check the result on the map.`,
-    );
+    report.notes.push(ambientT()('note.noPrj', { file: fileName }));
     return;
   }
   const wkt = await prj.async('text');
   if (isWgs84Def(wkt)) {
-    report.notes.push(`${fileName}: already in WGS84 (${crsNameFromWkt(wkt)}).`);
+    report.notes.push(
+      ambientT()('note.alreadyWgs84', { file: fileName, crs: crsNameFromWkt(wkt) }),
+    );
   } else {
-    report.notes.push(`${fileName}: reprojected from ${crsNameFromWkt(wkt)} to WGS84.`);
+    report.notes.push(
+      ambientT()('note.reprojected', { file: fileName, crs: crsNameFromWkt(wkt) }),
+    );
   }
 }
 
@@ -222,10 +226,10 @@ async function importLooseShapefile(
 ): Promise<void> {
   const shpFile = parts.get('shp');
   if (!shpFile) {
-    throw new Error('a .shp file is required alongside the other shapefile parts.');
+    throw new Error(ambientT()('note.needShp'));
   }
   if (!parts.get('dbf')) {
-    report.notes.push(`${base}: no .dbf selected, so no attributes were carried over.`);
+    report.notes.push(ambientT()('note.noDbf', { file: base }));
   }
 
   const prjText = parts.has('prj') ? await parts.get('prj')!.text() : null;
@@ -235,12 +239,14 @@ async function importLooseShapefile(
   if (prjText && !isWgs84Def(prjText)) {
     if (reprojectorFromDef(prjText, '')) {
       prjForShpjs = prjText;
-      report.notes.push(`${base}: reprojected from ${crsNameFromWkt(prjText)} to WGS84.`);
+      report.notes.push(
+        ambientT()('note.reprojected', { file: base, crs: crsNameFromWkt(prjText) }),
+      );
     } else {
-      report.notes.push(`${base}: the .prj could not be read; coordinates assumed to be WGS84.`);
+      report.notes.push(ambientT()('note.badPrj', { file: base }));
     }
   } else if (!prjText) {
-    report.notes.push(`${base}: no .prj selected — coordinates were read as WGS84.`);
+    report.notes.push(ambientT()('note.noPrjSelected', { file: base }));
   }
 
   const geometries = parseShp(await shpFile.arrayBuffer(), prjForShpjs) as Geometry[];
@@ -288,18 +294,17 @@ async function reprojectGeoJson(
   if (code !== null && code !== 4326) {
     const def = defForEpsg(code);
     if (!def) {
-      report.errors.push(
-        `${fileName}: declares EPSG:${code}, which this tool cannot convert offline. ` +
-          'Re-export the file as WGS84 (EPSG:4326) or as a zipped shapefile with a .prj.',
-      );
+      report.errors.push(ambientT()('note.epsgUnsupported', { file: fileName, code }));
       return { type: 'FeatureCollection', features: [] };
     }
     const reprojector = reprojectorFromDef(def, `EPSG:${code}`);
     if (!reprojector) {
-      report.errors.push(`${fileName}: EPSG:${code} could not be initialised.`);
+      report.errors.push(ambientT()('note.epsgFailed', { file: fileName, code }));
       return { type: 'FeatureCollection', features: [] };
     }
-    report.notes.push(`${fileName}: reprojected from EPSG:${code} to WGS84.`);
+    report.notes.push(
+      ambientT()('note.reprojected', { file: fileName, crs: `EPSG:${code}` }),
+    );
     return {
       type: 'FeatureCollection',
       features: collection.features.map((feature) => ({
@@ -315,10 +320,7 @@ async function reprojectGeoJson(
     (feature) => isPolygonal(feature.geometry) && looksProjected(feature.geometry),
   );
   if (projectedLooking) {
-    report.errors.push(
-      `${fileName}: coordinates fall outside the valid longitude/latitude range and the file ` +
-        'declares no CRS, so it cannot be placed on the map. Re-export it as WGS84.',
-    );
+    report.errors.push(ambientT()('note.outOfRange', { file: fileName }));
     return { type: 'FeatureCollection', features: [] };
   }
 
@@ -377,16 +379,12 @@ function collect(collection: FeatureCollection, source: string, report: ImportRe
   }
 
   if (found === 0) {
-    report.notes.push(`${source}: no polygons found (points and lines cannot become fields).`);
+    report.notes.push(ambientT()('note.noPolygons', { file: source }));
   } else if (skipped > 0) {
-    report.notes.push(
-      `${source}: skipped ${skipped} non-polygon feature${skipped === 1 ? '' : 's'}.`,
-    );
+    report.notes.push(ambientT().n('note.skipped', skipped, { file: source }));
   }
   if (repaired > 0) {
-    report.notes.push(
-      `${source}: dropped ${repaired} empty or degenerate polygon${repaired === 1 ? '' : 's'}.`,
-    );
+    report.notes.push(ambientT().n('note.degenerate', repaired, { file: source }));
   }
 }
 
@@ -446,11 +444,11 @@ export type AttributeTarget = 'client' | 'farm' | 'field';
 /** How a second column is joined onto the first. */
 export type JoinFormat = 'parentheses' | 'dash' | 'space' | 'prefix';
 
-export const JOIN_FORMATS: { id: JoinFormat; label: string; example: string }[] = [
-  { id: 'parentheses', label: 'Name (extra)', example: 'Bruno (293)' },
-  { id: 'dash', label: 'Name - extra', example: 'Bruno - 293' },
-  { id: 'space', label: 'Name extra', example: 'Bruno 293' },
-  { id: 'prefix', label: 'extra - Name', example: '293 - Bruno' },
+export const JOIN_FORMATS: { id: JoinFormat; labelKey: StringKey; example: string }[] = [
+  { id: 'parentheses', labelKey: 'join.parentheses', example: 'Bruno (293)' },
+  { id: 'dash', labelKey: 'join.dash', example: 'Bruno - 293' },
+  { id: 'space', labelKey: 'join.space', example: 'Bruno 293' },
+  { id: 'prefix', labelKey: 'join.prefix', example: '293 - Bruno' },
 ];
 
 /**

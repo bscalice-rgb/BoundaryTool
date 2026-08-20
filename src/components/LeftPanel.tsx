@@ -1,14 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FeatureId, FieldId, QAFlag, WField, Workspace } from '../types';
+import { useT } from '../i18n';
+import type { StringKey } from '../i18n';
 import { areaHa, formatHa } from '../lib/geo';
-import { describeField, fieldGeometries } from '../lib/qa';
+import { describeField, fieldGeometries, reviewKey } from '../lib/qa';
 import { UNGROUPED_COLOR, fieldColor } from '../lib/colors';
 import { Button, InfoDot, PanelHeader } from './ui';
 
-const ATTRIBUTE_GUIDANCE =
-  'Client, Farm and Field are the only attributes CropForce reads, and they are how a ' +
-  'boundary is matched to the right grower and holding. Keep the spelling identical ' +
-  'across every field belonging to the same client and farm.';
+/** Which fields the list shows, by the state of their quality flags. */
+export type StatusFilter = 'all' | 'issues' | 'blocking' | 'review' | 'clean';
+
+const STATUS_FILTERS: { id: StatusFilter; label: StringKey; hint: StringKey }[] = [
+  { id: 'all', label: 'filter.all', hint: 'filter.allHint' },
+  { id: 'issues', label: 'filter.issues', hint: 'filter.issuesHint' },
+  { id: 'blocking', label: 'filter.blocking', hint: 'filter.blockingHint' },
+  { id: 'review', label: 'filter.review', hint: 'filter.reviewHint' },
+  { id: 'clean', label: 'filter.clean', hint: 'filter.cleanHint' },
+];
 
 export interface AttributeFocus {
   fieldId: FieldId;
@@ -21,6 +29,8 @@ export interface LeftPanelProps {
   selection: ReadonlySet<FeatureId>;
   flags: QAFlag[];
   attributeFocus: AttributeFocus | null;
+  /** Warnings already waved through, so they stop counting as "needs review". */
+  reviewed: ReadonlySet<string>;
   onSelectFeature: (id: FeatureId | null, additive: boolean) => void;
   onSelectMany: (ids: FeatureId[]) => void;
   onUpdateField: (id: FieldId, patch: Partial<Omit<WField, 'id'>>) => void;
@@ -36,16 +46,40 @@ export interface LeftPanelProps {
 }
 
 export default function LeftPanel(props: LeftPanelProps) {
+  const t = useT();
   const { workspace, selection } = props;
   const [expanded, setExpanded] = useState<ReadonlySet<FieldId>>(new Set());
   /** Fields ticked for bulk attribute editing. Separate from the polygon selection. */
   const [checked, setChecked] = useState<ReadonlySet<FieldId>>(new Set());
   const [search, setSearch] = useState('');
+  const [status, setStatus] = useState<StatusFilter>('all');
 
   const allFields = useMemo(() => fieldGeometries(workspace), [workspace]);
   const allUngrouped = useMemo(
     () => workspace.features.filter((f) => f.fieldId === null),
     [workspace.features],
+  );
+
+  /** How many blocking flags and how many outstanding warnings each field carries. */
+  const statusByField = useMemo(() => {
+    const map = new Map<FieldId, { blocking: number; review: number }>();
+    for (const flag of props.flags) {
+      const outstanding =
+        flag.severity === 'blocking' || !props.reviewed.has(reviewKey(flag));
+      if (!outstanding) continue;
+      for (const id of flag.fieldIds) {
+        const entry = map.get(id) ?? { blocking: 0, review: 0 };
+        if (flag.severity === 'blocking') entry.blocking += 1;
+        else entry.review += 1;
+        map.set(id, entry);
+      }
+    }
+    return map;
+  }, [props.flags, props.reviewed]);
+
+  const blockingByField = useMemo(
+    () => new Map([...statusByField].map(([id, entry]) => [id, entry.blocking])),
+    [statusByField],
   );
 
   // Every word typed has to appear somewhere in the row, so "acme long" finds Long Acre
@@ -59,9 +93,24 @@ export default function LeftPanel(props: LeftPanelProps) {
     return terms.every((term) => text.includes(term));
   };
 
+  const matchesStatus = (id: FieldId): boolean => {
+    if (status === 'all') return true;
+    const entry = statusByField.get(id) ?? { blocking: 0, review: 0 };
+    switch (status) {
+      case 'blocking':
+        return entry.blocking > 0;
+      case 'review':
+        return entry.review > 0;
+      case 'issues':
+        return entry.blocking > 0 || entry.review > 0;
+      default:
+        return entry.blocking === 0 && entry.review === 0;
+    }
+  };
+
   const fields = useMemo(
     () =>
-      terms.length === 0
+      (terms.length === 0
         ? allFields
         : allFields.filter((entry) =>
             matches(
@@ -73,28 +122,28 @@ export default function LeftPanel(props: LeftPanelProps) {
                 )
                 .join(' '),
             ),
-          ),
+          )
+      ).filter((entry) => matchesStatus(entry.field.id)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allFields, terms, workspace.features],
+    [allFields, terms, workspace.features, status, statusByField],
   );
 
   const ungrouped = useMemo(
-    () => (terms.length === 0 ? allUngrouped : allUngrouped.filter((f) => matches(f.source))),
+    () =>
+      // A status filter is about fields; ungrouped polygons are not fields yet, so they
+      // step aside rather than pretending to have a status.
+      status !== 'all'
+        ? []
+        : terms.length === 0
+          ? allUngrouped
+          : allUngrouped.filter((f) => matches(f.source)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allUngrouped, terms],
+    [allUngrouped, terms, status],
   );
 
   const hiddenFields = allFields.length - fields.length;
-  const searching = terms.length > 0;
-
-  const blockingByField = useMemo(() => {
-    const map = new Map<FieldId, number>();
-    for (const flag of props.flags) {
-      if (flag.severity !== 'blocking') continue;
-      for (const id of flag.fieldIds) map.set(id, (map.get(id) ?? 0) + 1);
-    }
-    return map;
-  }, [props.flags]);
+  const filtering = terms.length > 0 || status !== 'all';
+  const searching = filtering;
 
   const totalHa = fields.reduce((sum, entry) => sum + entry.areaHa, 0);
   const selectedIds = [...selection];
@@ -133,10 +182,10 @@ export default function LeftPanel(props: LeftPanelProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col border-r border-ink-800 bg-ink-900">
-      <PanelHeader title="Fields" count={allFields.length}>
-        <InfoDot text={ATTRIBUTE_GUIDANCE} label="Client / Farm / Field" />
-        <Button tone="ghost" onClick={props.onNewField} title="Create an empty field row">
-          + Field
+      <PanelHeader title={t('fields.title')} count={allFields.length}>
+        <InfoDot text={t('fields.attributeGuidance')} label={t('fields.attributeLabel')} />
+        <Button tone="ghost" onClick={props.onNewField} title={t('fields.newHint')}>
+          {t('fields.new')}
         </Button>
       </PanelHeader>
 
@@ -157,9 +206,9 @@ export default function LeftPanel(props: LeftPanelProps) {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             onKeyDown={(event) => event.key === 'Escape' && setSearch('')}
-            placeholder="Search client, farm, field or file"
+            placeholder={t('fields.search')}
             spellCheck={false}
-            aria-label="Search fields"
+            aria-label={t('fields.searchLabel')}
             className="w-full rounded-md border border-ink-700 bg-ink-950 py-1.5 pl-7 pr-16
               text-xs text-ink-100 placeholder:text-ink-600 focus:border-crop-500 focus:outline-none"
           />
@@ -169,17 +218,17 @@ export default function LeftPanel(props: LeftPanelProps) {
                 type="button"
                 onClick={() => props.onZoomToFeatures(fields.flatMap((entry) => entry.featureIds))}
                 disabled={fields.length === 0}
-                aria-label="Zoom to matching fields"
-                title="Zoom the map to the matching fields"
+                aria-label={t('fields.zoomMatches')}
+                title={t('fields.zoomMatchesHint')}
                 className="rounded px-1.5 py-0.5 text-[10px] text-ink-400 hover:bg-ink-800
                   hover:text-crop-300 disabled:opacity-40"
               >
-                Zoom
+                {t('fields.zoom')}
               </button>
               <button
                 type="button"
                 onClick={() => setSearch('')}
-                aria-label="Clear search"
+                aria-label={t('fields.clearSearch')}
                 className="rounded px-1 py-0.5 text-ink-500 hover:bg-ink-800 hover:text-ink-100"
               >
                 <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -189,12 +238,48 @@ export default function LeftPanel(props: LeftPanelProps) {
             </span>
           )}
         </div>
+        <div className="mt-1.5 flex gap-1">
+          {STATUS_FILTERS.map((option) => {
+            const count =
+              option.id === 'all'
+                ? allFields.length
+                : allFields.filter((entry) => {
+                    const entry_ = statusByField.get(entry.field.id) ?? { blocking: 0, review: 0 };
+                    if (option.id === 'blocking') return entry_.blocking > 0;
+                    if (option.id === 'review') return entry_.review > 0;
+                    if (option.id === 'issues') return entry_.blocking > 0 || entry_.review > 0;
+                    return entry_.blocking === 0 && entry_.review === 0;
+                  }).length;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => setStatus(option.id)}
+                title={t(option.hint)}
+                aria-pressed={status === option.id}
+                className={`flex-1 rounded px-1.5 py-1 text-[10px] transition-colors
+                  ${
+                    status === option.id
+                      ? 'bg-ink-700 text-ink-100'
+                      : 'text-ink-400 hover:bg-ink-800 hover:text-ink-100'
+                  }`}
+              >
+                {t(option.label)}
+                <span className="ml-1 tabular-nums opacity-70">{count}</span>
+              </button>
+            );
+          })}
+        </div>
+
         {searching && (
           <p className="mt-1 px-0.5 text-[10px] text-ink-500">
-            {fields.length} of {allFields.length} field{allFields.length === 1 ? '' : 's'}
-            {hiddenFields > 0 && ` · ${hiddenFields} hidden`}
+            {t('fields.matchCount', { shown: fields.length, total: allFields.length })}
+            {hiddenFields > 0 && ` · ${t('fields.hiddenCount', { count: hiddenFields })}`}
             {allUngrouped.length > 0 &&
-              ` · ${ungrouped.length} of ${allUngrouped.length} ungrouped`}
+              ` · ${t('fields.ungroupedCount', {
+                shown: ungrouped.length,
+                total: allUngrouped.length,
+              })}`}
           </p>
         )}
       </div>
@@ -202,14 +287,13 @@ export default function LeftPanel(props: LeftPanelProps) {
       <div className="min-h-0 flex-1 overflow-y-auto">
         {searching && fields.length === 0 && ungrouped.length === 0 && (
           <p className="px-3 py-4 text-xs leading-relaxed text-ink-400">
-            Nothing matches “{search}”.
+            {t('fields.noMatches', { search })}
           </p>
         )}
 
         {!searching && fields.length === 0 && ungrouped.length === 0 && (
           <p className="px-3 py-4 text-xs leading-relaxed text-ink-400">
-            Nothing loaded yet. Drop boundary files anywhere on the window, or draw a polygon
-            with the map toolbar.
+            {t('fields.empty')}
           </p>
         )}
 
@@ -232,8 +316,8 @@ export default function LeftPanel(props: LeftPanelProps) {
                   <input
                     type="checkbox"
                     className="h-3 w-3 accent-crop-500 align-middle"
-                    aria-label="Select all fields"
-                    title="Select every field for bulk editing"
+                    aria-label={t('fields.selectAllFields')}
+                    title={t('fields.selectAllFieldsHint')}
                     checked={checkedIds.length > 0 && checkedIds.length === fields.length}
                     ref={(node) => {
                       // Partly-ticked reads as indeterminate rather than as "none ticked".
@@ -252,10 +336,18 @@ export default function LeftPanel(props: LeftPanelProps) {
                   />
                 </th>
                 <th className="border-b border-ink-800 py-1.5" />
-                <th className="border-b border-ink-800 px-1 py-1.5 text-left font-semibold">Client</th>
-                <th className="border-b border-ink-800 px-1 py-1.5 text-left font-semibold">Farm</th>
-                <th className="border-b border-ink-800 px-1 py-1.5 text-left font-semibold">Field</th>
-                <th className="border-b border-ink-800 px-1.5 py-1.5 text-right font-semibold">ha</th>
+                <th className="border-b border-ink-800 px-1 py-1.5 text-left font-semibold">
+                  {t('fields.client')}
+                </th>
+                <th className="border-b border-ink-800 px-1 py-1.5 text-left font-semibold">
+                  {t('fields.farm')}
+                </th>
+                <th className="border-b border-ink-800 px-1 py-1.5 text-left font-semibold">
+                  {t('fields.field')}
+                </th>
+                <th className="border-b border-ink-800 px-1.5 py-1.5 text-right font-semibold">
+                  {t('fields.ha')}
+                </th>
                 <th className="border-b border-ink-800 py-1.5" />
               </tr>
             </thead>
@@ -298,8 +390,8 @@ export default function LeftPanel(props: LeftPanelProps) {
               <tr className="text-[11px] text-ink-400">
                 <td colSpan={5} className="border-t border-ink-800 px-2 py-1.5">
                   {searching
-                    ? `${fields.length} shown of ${allFields.length}`
-                    : `${fields.length} field${fields.length === 1 ? '' : 's'} to export`}
+                    ? t('fields.shownOf', { shown: fields.length, total: allFields.length })
+                    : t.n('fields.toExport', fields.length)}
                 </td>
                 <td className="border-t border-ink-800 px-1.5 py-1.5 text-right tabular-nums text-ink-100">
                   {formatHa(totalHa)}
@@ -318,7 +410,7 @@ export default function LeftPanel(props: LeftPanelProps) {
                 style={{ borderColor: UNGROUPED_COLOR }}
               />
               <h3 className="text-[10px] font-semibold uppercase tracking-wider text-ink-400">
-                Ungrouped polygons
+                {t('ungrouped.title')}
               </h3>
               <span className="rounded bg-ink-800 px-1.5 text-[10px] tabular-nums text-ink-400">
                 {ungrouped.length}
@@ -328,7 +420,7 @@ export default function LeftPanel(props: LeftPanelProps) {
                 className="ml-auto text-[10px] text-ink-400 underline-offset-2 hover:text-crop-300 hover:underline"
                 onClick={() => props.onSelectMany(ungrouped.map((f) => f.id))}
               >
-                Select all
+                {t('ungrouped.selectAll')}
               </button>
             </div>
             <ul>
@@ -404,6 +496,7 @@ interface FieldRowProps {
 }
 
 function FieldRow(props: FieldRowProps) {
+  const t = useT();
   const { field } = props;
   const members = props.workspace.features.filter((f) => props.memberIds.includes(f.id));
 
@@ -419,14 +512,14 @@ function FieldRow(props: FieldRowProps) {
             className="h-3 w-3 accent-crop-500 align-middle"
             checked={props.checked}
             onChange={props.onCheck}
-            aria-label={`Select ${describeField(field)} for bulk editing`}
+            aria-label={t('fields.selectForBulk', { name: describeField(field, t) })}
           />
         </td>
         <td className="py-0.5">
           <button
             type="button"
             onClick={props.onToggle}
-            title={`${props.memberIds.length} polygon${props.memberIds.length === 1 ? '' : 's'}`}
+            title={t.n('fields.polygonCount', props.memberIds.length)}
             className="flex items-center gap-1 text-ink-400 hover:text-ink-100"
           >
             <svg
@@ -462,19 +555,17 @@ function FieldRow(props: FieldRowProps) {
           <div className="flex items-center justify-end gap-0.5">
             {props.blockingCount > 0 && (
               <span
-                title={`${props.blockingCount} issue${
-                  props.blockingCount === 1 ? '' : 's'
-                } blocking export`}
+                title={t.n('fields.blockingBadge', props.blockingCount)}
                 className="mr-0.5 grid h-4 w-4 place-items-center rounded-full bg-red-500/20
                   text-[9px] font-bold text-red-300"
               >
                 {props.blockingCount}
               </span>
             )}
-            <IconButton title="Select this field's polygons" onClick={props.onSelectMembers}>
+            <IconButton title={t('fields.selectMembers')} onClick={props.onSelectMembers}>
               <path d="M2 2h4M2 2v4M14 2h-4M14 2v4M2 14h4M2 14v-4M14 14h-4M14 14v-4" />
             </IconButton>
-            <IconButton title="Zoom to field" onClick={props.onZoom}>
+            <IconButton title={t('fields.zoomToField')} onClick={props.onZoom}>
               <circle cx="7" cy="7" r="4.5" />
               <path d="M10.5 10.5L14 14" />
             </IconButton>
@@ -488,7 +579,7 @@ function FieldRow(props: FieldRowProps) {
             <ul className="mb-1.5 space-y-0.5">
               {members.length === 0 && (
                 <li className="px-1 py-1 text-[11px] text-red-300">
-                  No polygons assigned. Select polygons on the map and add them to this field.
+                  {t('fields.noMembers')}
                 </li>
               )}
               {members.map((member) => (
@@ -506,11 +597,11 @@ function FieldRow(props: FieldRowProps) {
               ))}
             </ul>
             <div className="flex gap-1.5">
-              <Button tone="ghost" onClick={props.onUngroup} title="Release the polygons and remove the field row">
-                Ungroup
+              <Button tone="ghost" onClick={props.onUngroup} title={t('fields.ungroupHint')}>
+                {t('fields.ungroup')}
               </Button>
-              <Button tone="ghost" onClick={props.onDelete} title="Delete the field and its polygons">
-                Delete field
+              <Button tone="ghost" onClick={props.onDelete} title={t('fields.deleteFieldHint')}>
+                {t('fields.deleteField')}
               </Button>
             </div>
           </td>
@@ -535,6 +626,7 @@ function AttributeCell({
   focus: AttributeFocus | null;
   onChange: (value: string) => void;
 }) {
+  const t = useT();
   const ref = useRef<HTMLInputElement>(null);
   const targeted = focus?.column === column;
 
@@ -553,9 +645,9 @@ function AttributeCell({
         value={value}
         maxLength={30}
         spellCheck={false}
-        placeholder={column === 'field' ? 'Field name' : column === 'farm' ? 'Farm' : 'Client'}
+        placeholder={t(column === 'field' ? 'fields.fieldPlaceholder' : `fields.${column}`)}
         onChange={(event) => onChange(event.target.value)}
-        aria-label={column}
+        aria-label={t(`fields.${column}` as const)}
       />
     </td>
   );
@@ -582,6 +674,7 @@ function FeatureRow({
   onSelect: (additive: boolean) => void;
   onZoom: () => void;
 }) {
+  const t = useT();
   return (
     <div
       className={`group flex items-center gap-2 rounded px-2 ${dense ? 'py-0.5' : 'py-1'}
@@ -599,7 +692,7 @@ function FeatureRow({
         <span className="truncate text-[11px] text-ink-300">{label}</span>
       </button>
       <span className="shrink-0 text-[11px] tabular-nums text-ink-400">{formatHa(ha)} ha</span>
-      <IconButton title="Zoom to polygon" onClick={onZoom}>
+      <IconButton title={t('fields.zoomToPolygon')} onClick={onZoom}>
         <circle cx="7" cy="7" r="4.5" />
         <path d="M10.5 10.5L14 14" />
       </IconButton>
@@ -629,6 +722,7 @@ function BulkAttributeBar({
   onApply: (patch: Partial<Omit<WField, 'id'>>) => void;
   onClear: () => void;
 }) {
+  const t = useT();
   const [client, setClient] = useState('');
   const [farm, setFarm] = useState('');
   const nothingToApply = client.trim() === '' && farm.trim() === '';
@@ -647,23 +741,15 @@ function BulkAttributeBar({
     <div className="shrink-0 space-y-2 border-t border-ink-700 bg-ink-850 px-3 py-2.5">
       <div className="flex items-center gap-2">
         <span className="text-[11px] font-medium text-ink-100">
-          {count} field{count === 1 ? '' : 's'} ticked
+          {t.n('bulk.ticked', count)}
         </span>
-        <InfoDot
-          label="Bulk naming"
-          text={
-            'Set the same Client or Farm across every ticked field in one go. A box left ' +
-            'empty is not applied, so you can set the Client without touching the Farm ' +
-            'names already there. Field names stay per-row, because each one names a ' +
-            'different field.'
-          }
-        />
+        <InfoDot label={t('bulk.label')} text={t('bulk.guidance')} />
         <button
           type="button"
           onClick={onClear}
           className="ml-auto text-[10px] text-ink-400 underline-offset-2 hover:text-crop-300 hover:underline"
         >
-          Clear ticks
+          {t('bulk.clear')}
         </button>
       </div>
 
@@ -672,10 +758,10 @@ function BulkAttributeBar({
           value={client}
           onChange={(event) => setClient(event.target.value)}
           onKeyDown={(event) => event.key === 'Enter' && apply()}
-          placeholder="Client for all"
+          placeholder={t('bulk.clientPlaceholder')}
           maxLength={30}
           spellCheck={false}
-          aria-label="Client for all ticked fields"
+          aria-label={t('bulk.clientLabel')}
           className="min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-950 px-2 py-1.5
             text-xs text-ink-100 placeholder:text-ink-600 focus:border-crop-500 focus:outline-none"
         />
@@ -683,15 +769,15 @@ function BulkAttributeBar({
           value={farm}
           onChange={(event) => setFarm(event.target.value)}
           onKeyDown={(event) => event.key === 'Enter' && apply()}
-          placeholder="Farm for all"
+          placeholder={t('bulk.farmPlaceholder')}
           maxLength={30}
           spellCheck={false}
-          aria-label="Farm for all ticked fields"
+          aria-label={t('bulk.farmLabel')}
           className="min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-950 px-2 py-1.5
             text-xs text-ink-100 placeholder:text-ink-600 focus:border-crop-500 focus:outline-none"
         />
         <Button tone="primary" onClick={apply} disabled={nothingToApply}>
-          Apply
+          {t('bulk.apply')}
         </Button>
       </div>
     </div>
@@ -719,23 +805,24 @@ function SelectionBar({
   onDelete: () => void;
   onZoom: () => void;
 }) {
+  const t = useT();
   return (
     <div className="shrink-0 space-y-2 border-t border-ink-700 bg-ink-850 px-3 py-2.5">
       <div className="flex items-center gap-2">
         <span className="text-[11px] font-medium text-ink-100">
-          {count} polygon{count === 1 ? '' : 's'} selected
+          {t.n('selection.count', count)}
         </span>
         <button
           type="button"
           onClick={onZoom}
           className="ml-auto text-[10px] text-ink-400 underline-offset-2 hover:text-crop-300 hover:underline"
         >
-          Zoom to selection
+          {t('selection.zoom')}
         </button>
       </div>
 
       <Button tone="primary" onClick={onCombine} className="w-full">
-        Combine into one field
+        {t('selection.combine')}
       </Button>
 
       <div className="flex gap-1.5">
@@ -748,21 +835,21 @@ function SelectionBar({
             if (value) onAssign(value === '__none__' ? null : value);
             event.target.value = '';
           }}
-          aria-label="Move selection to a field"
+          aria-label={t('selection.moveToLabel')}
         >
-          <option value="">Move to field…</option>
+          <option value="">{t('selection.moveTo')}</option>
           {fields.map(({ field }) => (
             <option key={field.id} value={field.id}>
-              {[field.farm, field.field].filter(Boolean).join(' / ') || 'Untitled field'}
+              {[field.farm, field.field].filter(Boolean).join(' / ') || t('selection.untitled')}
             </option>
           ))}
-          <option value="__none__">Ungroup (no field)</option>
+          <option value="__none__">{t('selection.ungroupOption')}</option>
         </select>
-        <Button onClick={onMerge} title="Dissolve the selected polygons into a single polygon">
-          Merge
+        <Button onClick={onMerge} title={t('selection.mergeHint')}>
+          {t('selection.merge')}
         </Button>
-        <Button tone="danger" onClick={onDelete} title="Delete the selected polygons">
-          Delete
+        <Button tone="danger" onClick={onDelete} title={t('selection.deleteHint')}>
+          {t('selection.delete')}
         </Button>
       </div>
     </div>

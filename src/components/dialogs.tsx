@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { Position } from 'geojson';
 import type { WField, Workspace } from '../types';
+import { useT } from '../i18n';
 import { formatLatLon, parseLatLon } from '../lib/coords';
 import type {
   AttributeSource,
@@ -27,6 +28,7 @@ export function ImportDialog({
   onConfirm: (mapping: ColumnMapping) => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   const columns = useMemo(
     () => collectColumns(report.features.map((f) => f.sourceProps)),
     [report.features],
@@ -60,10 +62,11 @@ export function ImportDialog({
   };
 
   return (
-    <Modal title="Import boundaries" onClose={onCancel}>
+    <Modal title={t('import.title')} onClose={onCancel}>
       <p className="text-xs leading-relaxed text-ink-300">
-        Read {report.features.length} polygon{report.features.length === 1 ? '' : 's'} from{' '}
-        {sources.length} file{sources.length === 1 ? '' : 's'}.
+        {t.n('import.read', report.features.length, {
+          files: t.n('import.files', sources.length),
+        })}
       </p>
 
       <ul className="mt-2 space-y-0.5">
@@ -80,7 +83,7 @@ export function ImportDialog({
 
       {report.notes.length > 0 && (
         <div className="mt-3 rounded-md border border-ink-700 bg-ink-950/60 p-2.5">
-          <h3 className="mb-1 text-[11px] font-semibold text-ink-300">Notes</h3>
+          <h3 className="mb-1 text-[11px] font-semibold text-ink-300">{t('import.notes')}</h3>
           <ul className="space-y-1">
             {report.notes.map((note) => (
               <li key={note} className="text-[11px] leading-relaxed text-ink-400">
@@ -93,7 +96,7 @@ export function ImportDialog({
 
       {report.errors.length > 0 && (
         <div className="mt-3 rounded-md border border-red-800/60 bg-red-950/40 p-2.5">
-          <h3 className="mb-1 text-[11px] font-semibold text-red-200">Could not be read</h3>
+          <h3 className="mb-1 text-[11px] font-semibold text-red-200">{t('import.errors')}</h3>
           <ul className="space-y-1">
             {report.errors.map((error) => (
               <li key={error} className="text-[11px] leading-relaxed text-red-200/85">
@@ -107,15 +110,10 @@ export function ImportDialog({
       {report.features.length > 0 && (
         <fieldset className="mt-4">
           <legend className="text-[11px] font-semibold text-ink-100">
-            Which column is which?
+            {t('import.mappingTitle')}
           </legend>
           <p className="mt-1 text-[11px] leading-relaxed text-ink-400">
-            {columns.length === 0
-              ? 'These files carry no attributes, so every polygon arrives unnamed for you ' +
-                'to group and name yourself.'
-              : 'Point each CropForce attribute at the column that holds it — whatever the ' +
-                'file happens to call it. Anything left blank you fill in yourself. Each ' +
-                'polygon still arrives as its own field; nothing is merged on your behalf.'}
+            {t(columns.length === 0 ? 'import.mappingNone' : 'import.mappingHelp')}
           </p>
 
           {columns.length > 0 && (
@@ -124,20 +122,19 @@ export function ImportDialog({
                 const source = mapping[target];
                 const preview = previewOf(target);
                 const over = preview.length > 30;
+                const label = t(`fields.${target}` as const);
                 return (
                   <div key={target} className="grid grid-cols-[64px_1fr] items-start gap-2">
-                    <span className="pt-1.5 text-xs font-medium text-ink-100 capitalize">
-                      {target}
-                    </span>
+                    <span className="pt-1.5 text-xs font-medium text-ink-100">{label}</span>
                     <div>
                       <select
                         value={source.column ?? ''}
-                        aria-label={`${target} column`}
+                        aria-label={t('import.columnLabel', { target: label })}
                         onChange={(event) => choose(target, event.target.value || null)}
                         className="w-full rounded-md border border-ink-700 bg-ink-950 px-2 py-1.5
                           text-xs text-ink-100 focus:border-crop-500 focus:outline-none"
                       >
-                        <option value="">— leave blank —</option>
+                        <option value="">{t('import.leaveBlank')}</option>
                         {columns.map((column) => (
                           <option key={column.key} value={column.key}>
                             {column.key} ({column.filled}/{report.features.length})
@@ -149,7 +146,7 @@ export function ImportDialog({
                         <div className="mt-1.5 flex gap-1.5">
                           <select
                             value={source.extra ?? ''}
-                            aria-label={`${target} second column`}
+                            aria-label={t('import.secondColumnLabel', { target: label })}
                             onChange={(event) =>
                               setExtra(target, { extra: event.target.value || null })
                             }
@@ -157,7 +154,7 @@ export function ImportDialog({
                               px-2 py-1 text-[11px] text-ink-300 focus:border-crop-500
                               focus:outline-none"
                           >
-                            <option value="">— no second column —</option>
+                            <option value="">{t('import.noSecond')}</option>
                             {columns
                               .filter((column) => column.key !== source.column)
                               .map((column) => (
@@ -169,7 +166,7 @@ export function ImportDialog({
                           {source.extra !== null && (
                             <select
                               value={source.format}
-                              aria-label={`${target} join format`}
+                              aria-label={t('import.joinLabel', { target: label })}
                               onChange={(event) =>
                                 setExtra(target, { format: event.target.value as JoinFormat })
                               }
@@ -179,7 +176,7 @@ export function ImportDialog({
                             >
                               {JOIN_FORMATS.map((format) => (
                                 <option key={format.id} value={format.id}>
-                                  {format.example}
+                                  {format.example} · {t(format.labelKey)}
                                 </option>
                               ))}
                             </select>
@@ -189,11 +186,10 @@ export function ImportDialog({
 
                       {preview !== '' && (
                         <span className="mt-1 block truncate text-[10px] text-ink-500">
-                          e.g. “{preview}”
+                          {t('import.example', { value: preview })}
                           {over && (
                             <span className="text-amber-400">
-                              {' '}
-                              · {preview.length} characters, over the 30-character column
+                              {t('import.tooLong', { count: preview.length, limit: 30 })}
                             </span>
                           )}
                         </span>
@@ -208,13 +204,13 @@ export function ImportDialog({
       )}
 
       <div className="mt-4 flex justify-end gap-2">
-        <Button onClick={onCancel}>Cancel</Button>
+        <Button onClick={onCancel}>{t('import.cancel')}</Button>
         <Button
           tone="primary"
           disabled={report.features.length === 0}
           onClick={() => onConfirm(mapping)}
         >
-          Add to workspace
+          {t('import.confirm')}
         </Button>
       </div>
     </Modal>
@@ -236,15 +232,13 @@ export function OverlapDialog({
   onResolve: (keeperId: string, loserId: string) => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   const [keeperId, setKeeperId] = useState(fields[0].id);
   const loser = fields.find((field) => field.id !== keeperId)!;
 
   return (
-    <Modal title="Resolve overlap" onClose={onCancel} width="max-w-md">
-      <p className="text-xs leading-relaxed text-ink-300">
-        Choose which field keeps the shared area. The overlap is then clipped out of the other
-        one, leaving the two fields conjoined along a shared edge with no double-counted area.
-      </p>
+    <Modal title={t('overlap.title')} onClose={onCancel} width="max-w-md">
+      <p className="text-xs leading-relaxed text-ink-300">{t('overlap.intro')}</p>
 
       <div className="mt-3 space-y-1.5">
         {fields.map((field) => (
@@ -266,13 +260,15 @@ export function OverlapDialog({
             />
             <span className="min-w-0">
               <span className="block text-xs font-medium text-ink-100">
-                {describeField(field)}
+                {describeField(field, t)}
               </span>
               <span className="block text-[11px] text-ink-400">
-                {workspace.features.filter((f) => f.fieldId === field.id).length} polygon
-                {workspace.features.filter((f) => f.fieldId === field.id).length === 1 ? '' : 's'}
+                {t.n(
+                  'overlap.polygons',
+                  workspace.features.filter((f) => f.fieldId === field.id).length,
+                )}
                 {' · '}
-                {field.client || 'no client'}
+                {field.client || t('overlap.noClient')}
               </span>
             </span>
           </label>
@@ -280,14 +276,13 @@ export function OverlapDialog({
       </div>
 
       <p className="mt-3 text-[11px] text-ink-400">
-        {describeField(loser)} will lose the shared area. Ctrl+Z restores it if the result is
-        not what you wanted.
+        {t('overlap.loses', { field: describeField(loser, t) })}
       </p>
 
       <div className="mt-4 flex justify-end gap-2">
-        <Button onClick={onCancel}>Cancel</Button>
+        <Button onClick={onCancel}>{t('import.cancel')}</Button>
         <Button tone="primary" onClick={() => onResolve(keeperId, loser.id)}>
-          Clip the overlap
+          {t('overlap.confirm')}
         </Button>
       </div>
     </Modal>
@@ -313,17 +308,15 @@ export function ExportDialog({
   onDownload: () => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const [acknowledged, setAcknowledged] = useState(false);
   const needsAcknowledgement = !status.blocked && status.warnings.length > 0;
 
   return (
-    <Modal title="Export for CropForce" onClose={onClose}>
+    <Modal title={t('export.title')} onClose={onClose}>
       {status.blocked ? (
         <>
-          <p className="text-xs leading-relaxed text-red-200">
-            The export is blocked until these are resolved. Every one of them would produce a
-            boundary file CropForce cannot use as it stands.
-          </p>
+          <p className="text-xs leading-relaxed text-red-200">{t('export.blockedIntro')}</p>
           <ul className="mt-2 space-y-1 rounded-md border border-red-800/60 bg-red-950/40 p-2.5">
             {status.reasons.map((reason) => (
               <li key={reason} className="flex gap-2 text-[11px] leading-relaxed text-red-100">
@@ -336,33 +329,27 @@ export function ExportDialog({
       ) : (
         <>
           <dl className="grid grid-cols-3 gap-3 rounded-md border border-ink-700 bg-ink-950/60 p-3">
-            <Stat label="Rows" value={String(plan.rows.length)} />
+            <Stat label={t('export.rows')} value={String(plan.rows.length)} />
             <Stat
-              label="Polygons"
+              label={t('export.polygons')}
               value={String(plan.rows.reduce((sum, row) => sum + row.geometry.coordinates.length, 0))}
             />
-            <Stat label="Projection" value="WGS84" />
+            <Stat label={t('export.projection')} value="WGS84" />
           </dl>
 
-          <p className="mt-3 text-[11px] leading-relaxed text-ink-400">
-            One row per field, each field's polygons merged into a single MultiPolygon, with
-            Client, Farm and Field written as 30-character text columns. The zip contains
-            .shp, .shx, .dbf, .prj and .cpg.
-          </p>
+          <p className="mt-3 text-[11px] leading-relaxed text-ink-400">{t('export.summary')}</p>
 
           {plan.unassignedCount > 0 && (
             <p className="mt-2 rounded-md border border-amber-700/50 bg-amber-950/30 p-2.5
               text-[11px] leading-relaxed text-amber-200">
-              {plan.unassignedCount} polygon{plan.unassignedCount === 1 ? '' : 's'} not assigned
-              to a field will not be included.
+              {t.n('export.unassigned', plan.unassignedCount)}
             </p>
           )}
 
           {status.warnings.length > 0 && (
             <div className="mt-3 rounded-md border border-amber-700/50 bg-amber-950/25 p-2.5">
               <h3 className="mb-1.5 text-[11px] font-semibold text-amber-200">
-                {status.warnings.length} warning{status.warnings.length === 1 ? '' : 's'} left
-                unresolved
+                {t.n('export.warnings', status.warnings.length)}
               </h3>
               <ul className="space-y-1">
                 {status.warnings.slice(0, 6).map((warning) => (
@@ -372,7 +359,7 @@ export function ExportDialog({
                 ))}
                 {status.warnings.length > 6 && (
                   <li className="text-[11px] text-amber-200/70">
-                    and {status.warnings.length - 6} more.
+                    {t('export.andMore', { count: status.warnings.length - 6 })}
                   </li>
                 )}
               </ul>
@@ -383,13 +370,13 @@ export function ExportDialog({
                   onChange={(event) => setAcknowledged(event.target.checked)}
                   className="mt-0.5 h-3.5 w-3.5 accent-amber-400"
                 />
-                Download anyway — I have reviewed these warnings.
+                {t('export.acknowledge')}
               </label>
             </div>
           )}
 
           <label className="mt-3 block">
-            <span className="text-[11px] font-medium text-ink-300">File name</span>
+            <span className="text-[11px] font-medium text-ink-300">{t('export.fileName')}</span>
             <span className="mt-1 flex items-center gap-1.5">
               <input
                 value={fileName}
@@ -405,17 +392,15 @@ export function ExportDialog({
       )}
 
       <div className="mt-4 flex items-center gap-2">
-        <span className="text-[10px] text-ink-500">
-          Written in your browser. Nothing is uploaded.
-        </span>
+        <span className="text-[10px] text-ink-500">{t('export.localNote')}</span>
         <div className="ml-auto flex gap-2">
-          <Button onClick={onClose}>Close</Button>
+          <Button onClick={onClose}>{t('export.close')}</Button>
           <Button
             tone="primary"
             disabled={status.blocked || (needsAcknowledgement && !acknowledged)}
             onClick={onDownload}
           >
-            Download zip
+            {t('export.download')}
           </Button>
         </div>
       </div>
@@ -447,16 +432,14 @@ export function CoordinatesDialog({
   onGo: (position: Position) => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const [text, setText] = useState('');
   const parsed = parseLatLon(text);
   const invalid = text.trim() !== '' && parsed === null;
 
   return (
-    <Modal title="Go to coordinates" onClose={onClose} width="max-w-md">
-      <p className="text-xs leading-relaxed text-ink-300">
-        Paste a latitude and longitude, or a link from Google Maps or OpenStreetMap. The
-        map jumps there; nothing is looked up online.
-      </p>
+    <Modal title={t('coords.title')} onClose={onClose} width="max-w-md">
+      <p className="text-xs leading-relaxed text-ink-300">{t('coords.intro')}</p>
 
       <input
         autoFocus
@@ -467,7 +450,7 @@ export function CoordinatesDialog({
         }}
         placeholder="48.8566, 2.3522"
         spellCheck={false}
-        aria-label="Latitude and longitude"
+        aria-label={t('coords.label')}
         className={`mt-3 w-full rounded-md border bg-ink-950 px-2.5 py-2 text-xs text-ink-100
           placeholder:text-ink-600 focus:outline-none
           ${invalid ? 'border-red-700/70 focus:border-red-500' : 'border-ink-700 focus:border-crop-500'}`}
@@ -475,20 +458,20 @@ export function CoordinatesDialog({
 
       <p className="mt-1.5 min-h-4 text-[11px] text-ink-500">
         {parsed ? (
-          <span className="text-crop-300">Reads as {formatLatLon(parsed)}</span>
-        ) : invalid ? (
-          <span className="text-red-300">
-            Not a position. A place name needs an online lookup, which this tool does not do.
+          <span className="text-crop-300">
+            {t('coords.readsAs', { value: formatLatLon(parsed) })}
           </span>
+        ) : invalid ? (
+          <span className="text-red-300">{t('coords.invalid')}</span>
         ) : (
-          'Also accepts 48°51′23.8″N 2°21′07.9″E, geo: links, and pasted map URLs.'
+          t('coords.help')
         )}
       </p>
 
       <div className="mt-4 flex justify-end gap-2">
-        <Button onClick={onClose}>Cancel</Button>
+        <Button onClick={onClose}>{t('import.cancel')}</Button>
         <Button tone="primary" disabled={!parsed} onClick={() => parsed && onGo(parsed)}>
-          Go
+          {t('coords.go')}
         </Button>
       </div>
     </Modal>

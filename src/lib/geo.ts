@@ -28,8 +28,26 @@ export const areaM2 = (geometry: PolyGeom): number => area(feat(geometry));
 
 export const areaHa = (geometry: PolyGeom): number => areaM2(geometry) / 10_000;
 
+/**
+ * Locale used for every number this module formats. Set once by the language provider;
+ * kept module-level because area readouts are produced from Leaflet callbacks and from
+ * the check engine, neither of which sits inside the React tree.
+ */
+let numberLocales: string[] = ['en-GB'];
+
+export const setNumberLocale = (locales: string[]): void => {
+  numberLocales = locales;
+};
+
 export const formatHa = (ha: number): string =>
-  ha.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  ha.toLocaleString(numberLocales, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** A plain number in the current locale, for readouts that are not areas. */
+export const formatNum = (value: number, digits = 0): string =>
+  value.toLocaleString(numberLocales, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
 
 export const bboxOf = (geometry: PolyGeom): BBox => bbox(feat(geometry));
 
@@ -179,10 +197,13 @@ export function selfIntersections(geometry: PolyGeom): number {
   }
 }
 
+/** Why an outline is unusable, as a code the UI turns into words in its own language. */
+export type InvalidReason = 'none' | 'no-rings' | 'short-ring' | 'not-closed' | 'kinks';
+
 export interface ValidityReport {
   ok: boolean;
   kinkCount: number;
-  reason: string;
+  reason: InvalidReason;
 }
 
 /**
@@ -203,15 +224,15 @@ export function checkValidity(geometry: PolyGeom): ValidityReport {
 
 function computeValidity(geometry: PolyGeom): ValidityReport {
   const rings = allRings(geometry);
-  if (rings.length === 0) return { ok: false, kinkCount: 0, reason: 'geometry has no rings' };
+  if (rings.length === 0) return { ok: false, kinkCount: 0, reason: 'no-rings' };
   for (const ring of rings) {
     if (ring.length < 4) {
-      return { ok: false, kinkCount: 0, reason: 'a ring has fewer than 3 distinct points' };
+      return { ok: false, kinkCount: 0, reason: 'short-ring' };
     }
     const [fx, fy] = ring[0];
     const [lx, ly] = ring[ring.length - 1];
     if (fx !== lx || fy !== ly) {
-      return { ok: false, kinkCount: 0, reason: 'a ring is not closed' };
+      return { ok: false, kinkCount: 0, reason: 'not-closed' };
     }
   }
   const kinkCount = selfIntersections(geometry);
@@ -219,10 +240,10 @@ function computeValidity(geometry: PolyGeom): ValidityReport {
     return {
       ok: false,
       kinkCount,
-      reason: `${kinkCount} self-intersection${kinkCount === 1 ? '' : 's'} (bow-tie)`,
+      reason: 'kinks',
     };
   }
-  return { ok: true, kinkCount: 0, reason: '' };
+  return { ok: true, kinkCount: 0, reason: 'none' };
 }
 
 /**

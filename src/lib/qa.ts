@@ -1,5 +1,7 @@
 import buffer from '@turf/buffer';
 import type { BBox } from 'geojson';
+import { ambientT } from '../i18n/translator';
+import type { StringKey, Translator } from '../i18n/translator';
 import type {
   FieldId,
   FlagKind,
@@ -9,6 +11,7 @@ import type {
   WField,
   Workspace,
 } from '../types';
+import type { InvalidReason } from './geo';
 import {
   areaHa,
   areaM2,
@@ -18,6 +21,7 @@ import {
   differenceGeom,
   feat,
   formatHa,
+  formatNum,
   overlapAreaM2,
   perimeterMeters,
   repairGeometry,
@@ -58,51 +62,8 @@ export const DEFAULT_THRESHOLDS: QaThresholds = {
 /* Guidance — Arva, "What Makes a Good Field Boundary?"                        */
 /* -------------------------------------------------------------------------- */
 
-export const GUIDANCE: Record<FlagKind, string> = {
-  'missing-attributes':
-    'Every field needs a consistent Client, Farm and Field name. These three values are ' +
-    'the only attributes CropForce reads, and they are how the boundary is matched to the ' +
-    'right grower and holding.',
-  'invalid-geometry':
-    'A boundary must be a single continuous management zone with a clean outline. ' +
-    'Self-intersecting "bow-tie" rings have no well-defined inside, so area and overlap ' +
-    'calculations cannot be trusted.',
-  overlap:
-    'Fields must not overlap. Overlapping boundaries double-count area and make it ' +
-    'ambiguous which field an observation belongs to. Neighbouring fields should be ' +
-    'conjoined — sharing an edge, not sharing area.',
-  'jagged-edges':
-    'Boundaries should be smoothed. Jagged edges usually come from tracing raster imagery ' +
-    'or from raw GPS logs; they add noise without adding accuracy.',
-  'non-crop-area':
-    'A boundary should contain crop area only. Roads, tracks, waterways, headland buffers, ' +
-    'wind turbines and tree islands belong outside the boundary or inside an exclusion ' +
-    'zone cut into it.',
-  sliver:
-    'Stray fragments left over from digitising or from a bad clip are not management zones. ' +
-    'Remove them so each field is the area actually farmed.',
-  naming:
-    'Field names should identify the place, not the season. A name carrying a crop or a ' +
-    'year has to be renamed every time the rotation changes, which breaks year-on-year ' +
-    'comparison.',
-  unassigned:
-    'Only polygons grouped into a field are exported. A field is whatever set of polygons ' +
-    'you decide belongs together — several disjoint blocks farmed as one unit should be ' +
-    'one field, not several.',
-  'empty-field':
-    'A field row needs geometry. Assign at least one polygon to it, or delete the field.',
-  'name-too-long':
-    'Client, Farm and Field are written as 30-character text columns. Anything longer is ' +
-    'cut off when the file is written, and a name that has been cut off can collide with ' +
-    'another that was cut off at the same point — so two fields become one on upload. ' +
-    'Shorten them here, where you can see what you are losing.',
-  'duplicate-name':
-    'CropForce identifies a field by its Client, Farm and Field combination, so that ' +
-    'combination has to be unique. Upload two rows with the same one and the second ' +
-    'replaces the first: a boundary goes missing without any warning. Either rename them ' +
-    'so each is distinct, or — if they really are one field farmed in separate blocks — ' +
-    'combine them into a single field with one name.',
-};
+export const guidanceFor = (kind: FlagKind, t: Translator = ambientT()): string =>
+  t(`guidance.${kind}` as const);
 
 /* -------------------------------------------------------------------------- */
 /* Derived views over the workspace                                            */
@@ -180,11 +141,12 @@ const CROP_WORDS = [
 
 export function runChecks(
   workspace: Workspace,
+  t: Translator = ambientT(),
   thresholds: QaThresholds = DEFAULT_THRESHOLDS,
 ): QAFlag[] {
   const flags: QAFlag[] = [];
   const fields = fieldGeometries(workspace);
-  const labels = featureLabels(workspace);
+  const labels = featureLabels(workspace, t);
 
   /* -- Attributes and field membership ------------------------------------ */
 
@@ -197,13 +159,11 @@ export function runChecks(
         id: `missing:${field.id}`,
         kind: 'missing-attributes',
         severity: 'blocking',
-        title: `${describeField(field)} — ${missing.length} attribute${
-          missing.length === 1 ? '' : 's'
-        } missing`,
-        detail: `${missing.map(capitalise).join(', ')} ${
-          missing.length === 1 ? 'is' : 'are'
-        } empty. All three are required before export.`,
-        guidance: GUIDANCE['missing-attributes'],
+        title: t.n('flag.missing.title', missing.length, { field: describeField(field, t) }),
+        detail: t.n('flag.missing.detail', missing.length, {
+          columns: missing.map((key) => t(`fields.${key}` as const)).join(', '),
+        }),
+        guidance: guidanceFor('missing-attributes', t),
         featureIds,
         fieldIds: [field.id],
         manual: 'attributes',
@@ -215,9 +175,9 @@ export function runChecks(
         id: `empty:${field.id}`,
         kind: 'empty-field',
         severity: 'blocking',
-        title: `${describeField(field)} — no polygons assigned`,
-        detail: 'This field would export as a row with no geometry.',
-        guidance: GUIDANCE['empty-field'],
+        title: t('flag.empty.title', { field: describeField(field, t) }),
+        detail: t('flag.empty.detail'),
+        guidance: guidanceFor('empty-field', t),
         featureIds: [],
         fieldIds: [field.id],
         manual: 'attributes',
@@ -225,15 +185,15 @@ export function runChecks(
     }
 
     if (field.field.trim() !== '') {
-      const reason = namingProblem(field.field);
+      const reason = namingProblem(field.field, t);
       if (reason) {
         flags.push({
           id: `naming:${field.id}`,
           kind: 'naming',
           severity: 'warning',
-          title: `${describeField(field)} — name looks season-specific`,
+          title: t('flag.naming.title', { field: describeField(field, t) }),
           detail: reason,
-          guidance: GUIDANCE.naming,
+          guidance: guidanceFor('naming', t),
           featureIds,
           fieldIds: [field.id],
           manual: 'attributes',
@@ -253,17 +213,17 @@ export function runChecks(
   for (const entry of overLong) {
     const columns = (['client', 'farm', 'field'] as const)
       .filter((key) => entry.field[key].trim().length > NAME_LIMIT)
-      .map((key) => `${capitalise(key)} (${entry.field[key].trim().length})`);
+      .map((key) => `${t(`fields.${key}` as const)} (${entry.field[key].trim().length})`);
     flags.push({
       id: `toolong:${entry.field.id}`,
       kind: 'name-too-long',
       severity: 'blocking',
-      title: `${describeField(entry.field)} — name too long for the column`,
-      detail:
-        `${columns.join(', ')} ${columns.length === 1 ? 'exceeds' : 'exceed'} the ` +
-        `${NAME_LIMIT}-character limit and would be cut off on export. Auto-fix trims at a ` +
-        'word boundary and keeps every name distinct.',
-      guidance: GUIDANCE['name-too-long'],
+      title: t('flag.tooLong.title', { field: describeField(entry.field, t) }),
+      detail: t.n('flag.tooLong.detail', columns.length, {
+        columns: columns.join(', '),
+        limit: NAME_LIMIT,
+      }),
+      guidance: guidanceFor('name-too-long', t),
       featureIds: entry.featureIds,
       fieldIds: [entry.field.id],
       autoFix: { kind: 'shorten-names' },
@@ -298,13 +258,15 @@ export function runChecks(
       id: `duplicate:${key}`,
       kind: 'duplicate-name',
       severity: 'blocking',
-      title: `${group.length} fields share the name ${describeField(first)}`,
-      detail:
-        `${first.client} / ${first.farm} / ${first.field} is used ${group.length} times. ` +
-        'CropForce would keep only the last one uploaded and drop the rest. Auto-fix ' +
-        'numbers them apart; if they are one field in several blocks, select them and ' +
-        'combine them instead.',
-      guidance: GUIDANCE['duplicate-name'],
+      title: t('flag.duplicate.title', {
+        count: group.length,
+        field: describeField(first, t),
+      }),
+      detail: t('flag.duplicate.detail', {
+        combination: `${first.client} / ${first.farm} / ${first.field}`,
+        count: group.length,
+      }),
+      guidance: guidanceFor('duplicate-name', t),
       featureIds: group.flatMap((entry) => entry.featureIds),
       fieldIds: group.map((entry) => entry.field.id),
       autoFix: { kind: 'uniquify-names' },
@@ -318,13 +280,9 @@ export function runChecks(
       id: 'unassigned',
       kind: 'unassigned',
       severity: 'warning',
-      title: `${unassigned.length} polygon${
-        unassigned.length === 1 ? '' : 's'
-      } not assigned to a field`,
-      detail:
-        `These will not be exported. Select them and use “Combine into field”, ` +
-        `or delete them if they are not needed.`,
-      guidance: GUIDANCE.unassigned,
+      title: t.n('flag.unassigned.title', unassigned.length),
+      detail: t('flag.unassigned.detail'),
+      guidance: guidanceFor('unassigned', t),
       featureIds: unassigned.map((f) => f.id),
       fieldIds: [],
       manual: 'attributes',
@@ -334,16 +292,21 @@ export function runChecks(
   /* -- Per-feature geometry ------------------------------------------------ */
 
   for (const feature of workspace.features) {
-    const label = labels.get(feature.id) ?? 'Polygon';
+    const label = labels.get(feature.id) ?? t('flag.polygon');
     const validity = checkValidity(feature.geometry);
     if (!validity.ok) {
       flags.push({
         id: `invalid:${feature.id}`,
         kind: 'invalid-geometry',
         severity: 'blocking',
-        title: `${label} — invalid geometry`,
-        detail: `The outline has ${validity.reason}.`,
-        guidance: GUIDANCE['invalid-geometry'],
+        title: t('flag.invalid.title', { feature: label }),
+        detail: t('flag.invalid.detail', {
+          reason:
+            validity.reason === 'kinks'
+              ? t.n('flag.invalid.kinks', validity.kinkCount)
+              : t(INVALID_KEYS[validity.reason]),
+        }),
+        guidance: guidanceFor('invalid-geometry', t),
         featureIds: [feature.id],
         fieldIds: feature.fieldId ? [feature.fieldId] : [],
         autoFix: { kind: 'unkink' },
@@ -359,11 +322,9 @@ export function runChecks(
         id: `sliver:${feature.id}`,
         kind: 'sliver',
         severity: 'warning',
-        title: `${label} — sliver (${formatHa(ha)} ha)`,
-        detail:
-          `Smaller than the ${formatHa(thresholds.sliverAreaHa)} ha threshold, so this is ` +
-          'probably a digitising fragment rather than a management zone.',
-        guidance: GUIDANCE.sliver,
+        title: t('flag.sliver.title', { feature: label, area: formatHa(ha) }),
+        detail: t('flag.sliver.detail', { threshold: formatHa(thresholds.sliverAreaHa) }),
+        guidance: guidanceFor('sliver', t),
         featureIds: [feature.id],
         fieldIds: feature.fieldId ? [feature.fieldId] : [],
         autoFix: { kind: 'delete-features' },
@@ -381,12 +342,14 @@ export function runChecks(
         id: `jagged:${feature.id}`,
         kind: 'jagged-edges',
         severity: 'warning',
-        title: `${label} — jagged edges (${vertices} vertices)`,
-        detail:
-          `Vertices sit about ${spacing.toFixed(1)} m apart over ${Math.round(perimeter)} m ` +
-          `of boundary — ${(vertices / ha).toFixed(0)} per hectare. Suggested smoothing ` +
-          `tolerance: ${tolerance} m.`,
-        guidance: GUIDANCE['jagged-edges'],
+        title: t('flag.jagged.title', { feature: label, count: vertices }),
+        detail: t('flag.jagged.detail', {
+          spacing: formatNum(spacing, 1),
+          perimeter: formatNum(perimeter),
+          density: formatNum(vertices / ha),
+          tolerance,
+        }),
+        guidance: guidanceFor('jagged-edges', t),
         featureIds: [feature.id],
         fieldIds: feature.fieldId ? [feature.fieldId] : [],
         autoFix: { kind: 'simplify', toleranceMeters: tolerance },
@@ -400,12 +363,12 @@ export function runChecks(
         id: `noncrop:${feature.id}`,
         kind: 'non-crop-area',
         severity: 'warning',
-        title: `${label} — possible non-crop area included`,
-        detail:
-          `About ${(protrusion * 100).toFixed(0)}% of the area sits in strips narrower than ` +
-          `${thresholds.protrusionWidthM * 2} m, which is the shape a track, watercourse or ` +
-          'headland buffer makes. Check it against the imagery — this is a hint, not a verdict.',
-        guidance: GUIDANCE['non-crop-area'],
+        title: t('flag.noncrop.title', { feature: label }),
+        detail: t('flag.noncrop.detail', {
+          percent: formatNum(protrusion * 100),
+          width: thresholds.protrusionWidthM * 2,
+        }),
+        guidance: guidanceFor('non-crop-area', t),
         featureIds: [feature.id],
         fieldIds: feature.fieldId ? [feature.fieldId] : [],
         manual: 'cut-hole',
@@ -427,9 +390,15 @@ export function runChecks(
         id: `overlap:${a.field.id}:${b.field.id}`,
         kind: 'overlap',
         severity: 'blocking',
-        title: `${describeField(a.field)} overlaps ${describeField(b.field)}`,
-        detail: `They share ${formatHa(shared / 10_000)} ha (${Math.round(shared)} m²).`,
-        guidance: GUIDANCE.overlap,
+        title: t('flag.overlap.title', {
+          a: describeField(a.field, t),
+          b: describeField(b.field, t),
+        }),
+        detail: t('flag.overlap.detail', {
+          area: formatHa(shared / 10_000),
+          squareMetres: formatNum(shared),
+        }),
+        guidance: guidanceFor('overlap', t),
         featureIds: [...a.featureIds, ...b.featureIds],
         fieldIds: [a.field.id, b.field.id],
         autoFix: { kind: 'resolve-overlap' },
@@ -487,19 +456,17 @@ function computeProtrusionShare(geometry: PolyGeom, widthM: number): number | nu
 }
 
 /** Explains why a field name looks season-specific, or returns null if it is fine. */
-export function namingProblem(name: string): string | null {
+export function namingProblem(name: string, t: Translator = ambientT()): string | null {
   const year = /\b(19|20)\d{2}\b/.exec(name);
   if (year) {
-    return `“${name}” contains the year ${year[0]}. Field names should stay the same from ` +
-      'season to season.';
+    return t('flag.naming.year', { name, year: year[0] });
   }
   const lower = ` ${name.toLowerCase()} `;
   const crop = CROP_WORDS.find((word) =>
     new RegExp(`[^a-z]${word}[^a-z]`).test(lower.replace(/[^a-z0-9]/g, ' ')),
   );
   if (crop) {
-    return `“${name}” contains the crop name “${crop}”. Name the place, not what is ` +
-      'growing in it this year.';
+    return t('flag.naming.crop', { name, crop });
   }
   return null;
 }
@@ -508,13 +475,20 @@ export function namingProblem(name: string): string | null {
 /* Labels                                                                      */
 /* -------------------------------------------------------------------------- */
 
-const capitalise = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
+/** Validity codes mapped onto the phrases that complete "The outline has …". */
+const INVALID_KEYS = {
+  none: 'flag.invalid.noRings',
+  'no-rings': 'flag.invalid.noRings',
+  'short-ring': 'flag.invalid.shortRing',
+  'not-closed': 'flag.invalid.notClosed',
+  kinks: 'flag.invalid.noRings',
+} as const satisfies Record<InvalidReason, StringKey>;
 
-export function describeField(field: WField): string {
+export function describeField(field: WField, t: Translator = ambientT()): string {
   const name = field.field.trim();
   const farm = field.farm.trim();
   if (name && farm) return `${farm} / ${name}`;
-  return name || farm || field.client.trim() || 'Untitled field';
+  return name || farm || field.client.trim() || t('flag.untitled');
 }
 
 /**
@@ -522,7 +496,7 @@ export function describeField(field: WField): string {
  * Built in a single pass because the per-feature alternative rescans the whole feature
  * list for each label.
  */
-export function featureLabels(workspace: Workspace): Map<string, string> {
+export function featureLabels(workspace: Workspace, t: Translator = ambientT()): Map<string, string> {
   const fieldsById = new Map(workspace.fields.map((field) => [field.id, field]));
   const counters = new Map<string, number>();
   const labels = new Map<string, string>();
@@ -532,13 +506,17 @@ export function featureLabels(workspace: Workspace): Map<string, string> {
     counters.set(feature.source, n);
     const base = `${feature.source} #${n}`;
     const field = feature.fieldId ? fieldsById.get(feature.fieldId) : undefined;
-    labels.set(feature.id, field ? `${describeField(field)} · ${base}` : base);
+    labels.set(feature.id, field ? `${describeField(field, t)} · ${base}` : base);
   }
   return labels;
 }
 
-export function describeFeature(workspace: Workspace, featureId: string): string {
-  return featureLabels(workspace).get(featureId) ?? 'Polygon';
+export function describeFeature(
+  workspace: Workspace,
+  featureId: string,
+  t: Translator = ambientT(),
+): string {
+  return featureLabels(workspace, t).get(featureId) ?? t('flag.polygon');
 }
 
 /* -------------------------------------------------------------------------- */
@@ -577,7 +555,11 @@ export function uniqueFieldName(field: WField, taken: ReadonlySet<string>): stri
  * Renames every field after the first in each colliding group. The first keeps the name
  * it has, so the user's own naming survives and only the surplus is disturbed.
  */
-export function autoUniquifyNames(workspace: Workspace, fieldIds: FieldId[]): FixOutcome {
+export function autoUniquifyNames(
+  workspace: Workspace,
+  fieldIds: FieldId[],
+  t: Translator = ambientT(),
+): FixOutcome {
   const target = new Set(fieldIds);
   const taken = new Set(workspace.fields.map(nameKey));
   const seen = new Set<string>();
@@ -602,7 +584,7 @@ export function autoUniquifyNames(workspace: Workspace, fieldIds: FieldId[]): Fi
 
   return {
     workspace: { ...workspace, fields },
-    message: `Renamed ${renamed} field${renamed === 1 ? '' : 's'} so each combination is unique.`,
+    message: t.n('fix.renamed', renamed),
     ok: renamed > 0,
   };
 }
@@ -626,7 +608,11 @@ export function shortenToLimit(value: string): string {
  * Shortens every over-length value on the named fields, then makes sure the results are
  * still distinct — two long names cut at the same point would otherwise become one row.
  */
-export function autoShortenNames(workspace: Workspace, fieldIds: FieldId[]): FixOutcome {
+export function autoShortenNames(
+  workspace: Workspace,
+  fieldIds: FieldId[],
+  t: Translator = ambientT(),
+): FixOutcome {
   const target = new Set(fieldIds);
   let shortened = 0;
 
@@ -642,20 +628,37 @@ export function autoShortenNames(workspace: Workspace, fieldIds: FieldId[]): Fix
   });
 
   if (shortened === 0) {
-    return { workspace, message: 'Every name already fits.', ok: false };
+    return { workspace, message: t('fix.alreadyFits'), ok: false };
   }
 
   // Shortening can turn two distinct names into the same one, so settle that here
   // rather than leaving the user with a fresh duplicate flag to chase.
-  const settled = autoUniquifyNames({ ...workspace, fields }, fields.map((f) => f.id));
-  const collisions = settled.ok ? ' Two of them then matched, so they were numbered apart.' : '';
+  const settled = autoUniquifyNames({ ...workspace, fields }, fields.map((f) => f.id), t);
+  const collisions = settled.ok ? t('fix.shortenedCollided') : '';
 
   return {
     workspace: settled.ok ? settled.workspace : { ...workspace, fields },
-    message: `Shortened ${shortened} name${shortened === 1 ? '' : 's'} to ${NAME_LIMIT} characters.${collisions}`,
+    message: t.n('fix.shortened', shortened, { limit: NAME_LIMIT }) + collisions,
     ok: true,
   };
 }
+
+/* -------------------------------------------------------------------------- */
+/* Reviewed warnings                                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Identity of a flag *as the user saw it when they dismissed it*.
+ *
+ * The detail line is part of the key on purpose. Marking a jagged boundary as reviewed
+ * settles that boundary at 250 vertices; if it is later edited into something else the
+ * detail changes, the key stops matching, and the flag comes back to be looked at again.
+ * Dismissing a judgement call should not silence the check forever.
+ */
+export const reviewKey = (flag: QAFlag): string => `${flag.id}::${flag.detail}`;
+
+/** Only soft warnings can be waved through: a blocking flag would break the upload. */
+export const canReview = (flag: QAFlag): boolean => flag.severity === 'warning';
 
 /* -------------------------------------------------------------------------- */
 /* Blocking status                                                             */
@@ -695,7 +698,11 @@ export interface FixOutcome {
 }
 
 /** Repairs self-intersections on the flagged features. */
-export function autoFixGeometry(workspace: Workspace, featureIds: string[]): FixOutcome {
+export function autoFixGeometry(
+  workspace: Workspace,
+  featureIds: string[],
+  t: Translator = ambientT(),
+): FixOutcome {
   let repaired = 0;
   let dropped = 0;
   const features = workspace.features.flatMap((feature) => {
@@ -709,22 +716,26 @@ export function autoFixGeometry(workspace: Workspace, featureIds: string[]): Fix
     return [{ ...feature, geometry: fixed }];
   });
   const parts = [
-    repaired > 0 ? `Repaired ${repaired} polygon${repaired === 1 ? '' : 's'}` : '',
-    dropped > 0 ? `removed ${dropped} that could not be repaired` : '',
+    repaired > 0 ? t.n('fix.repaired', repaired) : '',
+    dropped > 0 ? t('fix.dropped', { count: dropped }) : '',
   ].filter(Boolean);
   return {
     workspace: { ...workspace, features },
-    message: parts.join(' and ') + '.',
+    message: parts.join(t('fix.and')) + '.',
     ok: repaired > 0 || dropped > 0,
   };
 }
 
-export function autoDeleteFeatures(workspace: Workspace, featureIds: string[]): FixOutcome {
+export function autoDeleteFeatures(
+  workspace: Workspace,
+  featureIds: string[],
+  t: Translator = ambientT(),
+): FixOutcome {
   const features = workspace.features.filter((f) => !featureIds.includes(f.id));
   const removed = workspace.features.length - features.length;
   return {
     workspace: { ...workspace, features },
-    message: `Deleted ${removed} sliver${removed === 1 ? '' : 's'}.`,
+    message: t.n('fix.deletedSlivers', removed),
     ok: removed > 0,
   };
 }
@@ -733,6 +744,7 @@ export function autoSimplify(
   workspace: Workspace,
   featureIds: string[],
   toleranceMeters: number,
+  t: Translator = ambientT(),
 ): FixOutcome {
   let before = 0;
   let after = 0;
@@ -746,7 +758,7 @@ export function autoSimplify(
   });
   return {
     workspace: { ...workspace, features },
-    message: `Smoothed at ${toleranceMeters} m: ${before} vertices reduced to ${after}.`,
+    message: t('fix.smoothed', { tolerance: toleranceMeters, before, after }),
     ok: after < before,
   };
 }
@@ -759,12 +771,13 @@ export function resolveOverlap(
   workspace: Workspace,
   keeperId: FieldId,
   loserId: FieldId,
+  t: Translator = ambientT(),
 ): FixOutcome {
   const keeper = unionAll(
     workspace.features.filter((f) => f.fieldId === keeperId).map((f) => f.geometry),
   );
   if (!keeper) {
-    return { workspace, message: 'The field to keep has no geometry.', ok: false };
+    return { workspace, message: t('fix.noKeeper'), ok: false };
   }
 
   let clipped = 0;
@@ -782,12 +795,12 @@ export function resolveOverlap(
   });
 
   if (clipped === 0 && removed === 0) {
-    return { workspace, message: 'Nothing to clip — the overlap had already gone.', ok: false };
+    return { workspace, message: t('fix.noOverlap'), ok: false };
   }
-  const note = removed > 0 ? ` ${removed} polygon${removed === 1 ? '' : 's'} was fully inside the kept field and was removed.` : '';
+  const note = removed > 0 ? t.n('fix.clippedRemoved', removed) : '';
   return {
     workspace: { ...workspace, features },
-    message: `Clipped the shared area out of the other field.${note}`,
+    message: t('fix.clipped') + note,
     ok: true,
   };
 }

@@ -39,7 +39,7 @@ test.beforeEach(async ({ page }) => {
 
 /** The attribute table cells, addressed precisely so the panel's info buttons cannot match. */
 const attributeCell = (page: Page, column: 'client' | 'farm' | 'field') =>
-  page.locator(`input[aria-label="${column}"]`);
+  page.locator(`input[aria-label="${column[0].toUpperCase()}${column.slice(1)}"]`);
 
 /**
  * Loads the three sample files. Attribute mapping is switched off so the polygons
@@ -101,7 +101,7 @@ test('maps a source column onto a CropForce attribute', async ({ page }) => {
   await page.getByRole('button', { name: 'Add to workspace' }).click();
 
   const names = await page
-    .locator('input[aria-label="field"]')
+    .locator('input[aria-label="Field"]')
     .evaluateAll((inputs) => (inputs as HTMLInputElement[]).map((input) => input.value).sort());
   expect(names).toContain('Church Field');
   expect(names).toContain('Two Halves');
@@ -116,11 +116,11 @@ test('leaves an attribute blank when no column is chosen for it', async ({ page 
   await page.getByRole('button', { name: 'Add to workspace' }).click();
 
   const farms = await page
-    .locator('input[aria-label="farm"]')
+    .locator('input[aria-label="Farm"]')
     .evaluateAll((inputs) => (inputs as HTMLInputElement[]).map((input) => input.value));
   expect(farms.every((value) => value === '')).toBe(true);
   // Client was still mapped, so it came across.
-  await expect(page.locator('input[aria-label="client"]').first()).not.toHaveValue('');
+  await expect(page.locator('input[aria-label="Client"]').first()).not.toHaveValue('');
 });
 
 test('will not point two attributes at the same column', async ({ page }) => {
@@ -358,12 +358,12 @@ test.describe('bulk naming', () => {
   async function importAsFields(page: Page) {
     await page.setInputFiles('input[type=file]', FILES);
     await page.getByRole('button', { name: 'Add to workspace' }).click();
-    await expect(page.locator('input[aria-label="field"]')).toHaveCount(FIELD_COUNT);
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(FIELD_COUNT);
   }
 
   const clientValues = (page: Page) =>
     page
-      .locator('input[aria-label="client"]')
+      .locator('input[aria-label="Client"]')
       .evaluateAll((inputs) => (inputs as HTMLInputElement[]).map((input) => input.value));
 
   test('applies one client and farm across every ticked field', async ({ page }) => {
@@ -378,10 +378,10 @@ test.describe('bulk naming', () => {
     await page.getByRole('button', { name: 'Apply' }).click();
 
     expect(await clientValues(page)).toEqual(Array(FIELD_COUNT).fill('Ferme SA'));
-    await expect(page.locator('input[aria-label="farm"]').first()).toHaveValue('Nord');
+    await expect(page.locator('input[aria-label="Farm"]').first()).toHaveValue('Nord');
     // The per-row field names are untouched by a bulk client change.
     const fieldNames = await page
-      .locator('input[aria-label="field"]')
+      .locator('input[aria-label="Field"]')
       .evaluateAll((inputs) => (inputs as HTMLInputElement[]).map((input) => input.value).sort());
     expect(fieldNames).toContain('Church Field');
     expect(fieldNames).toContain('Two Halves');
@@ -635,7 +635,7 @@ test.describe('finding a field', () => {
     await page.getByRole('dialog', { name: 'Import boundaries' }).getByLabel('field column')
       .selectOption('name');
     await page.getByRole('button', { name: 'Add to workspace' }).click();
-    await expect(page.locator('input[aria-label="field"]')).toHaveCount(4);
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(4);
   }
 
   test('filters the list down to what was typed', async ({ page }) => {
@@ -643,8 +643,8 @@ test.describe('finding a field', () => {
     await importNamed(page);
 
     await page.getByLabel('Search fields').fill('church');
-    await expect(page.locator('input[aria-label="field"]')).toHaveCount(1);
-    await expect(page.locator('input[aria-label="field"]').first()).toHaveValue('Church Field');
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(1);
+    await expect(page.locator('input[aria-label="Field"]').first()).toHaveValue('Church Field');
     await expect(page.getByText('1 of 4 fields')).toBeVisible();
   });
 
@@ -654,7 +654,7 @@ test.describe('finding a field', () => {
 
     // "Bell Farms" is the Client and "Church Field" the Field: two columns, reversed.
     await page.getByLabel('Search fields').fill('church bell');
-    await expect(page.locator('input[aria-label="field"]')).toHaveCount(1);
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(1);
   });
 
   test('matches the source filename too', async ({ page }) => {
@@ -662,7 +662,7 @@ test.describe('finding a field', () => {
     await importNamed(page);
 
     await page.getByLabel('Search fields').fill('parcelles.zip');
-    await expect(page.locator('input[aria-label="field"]')).toHaveCount(1);
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(1);
   });
 
   test('says so when nothing matches, and clears back to everything', async ({ page }) => {
@@ -673,7 +673,7 @@ test.describe('finding a field', () => {
     await expect(page.getByText(/Nothing matches/)).toBeVisible();
 
     await page.getByRole('button', { name: 'Clear search' }).click();
-    await expect(page.locator('input[aria-label="field"]')).toHaveCount(4);
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(4);
   });
 
   test('zooms the map to the matches', async ({ page }) => {
@@ -719,7 +719,7 @@ test.describe('duplicate Client/Farm/Field', () => {
     await flag.getByRole('button', { name: 'Auto-fix' }).click();
 
     const names = await page
-      .locator('input[aria-label="field"]')
+      .locator('input[aria-label="Field"]')
       .evaluateAll((inputs) => (inputs as HTMLInputElement[]).map((input) => input.value));
     expect(names).toEqual(['Long Acre', 'Long Acre (2)']);
     await expect(page.locator('article', { hasText: 'share the name' })).toBeHidden();
@@ -737,7 +737,7 @@ test.describe('duplicate Client/Farm/Field', () => {
     await page.getByRole('button', { name: 'Combine into one field' }).click();
 
     await expect(page.locator('article', { hasText: 'share the name' })).toBeHidden();
-    await expect(page.locator('input[aria-label="field"]')).toHaveCount(1);
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(1);
   });
 });
 
@@ -796,7 +796,7 @@ test('keeps an audit reference in the field name', async ({ page }) => {
   await page.getByRole('button', { name: 'Add to workspace' }).click();
 
   const names = await page
-    .locator('input[aria-label="field"]')
+    .locator('input[aria-label="Field"]')
     .evaluateAll((inputs) => (inputs as HTMLInputElement[]).map((input) => input.value));
   expect(names).toContain('Church Field (Bell Farms)');
 });
@@ -866,4 +866,126 @@ test('keeps nothing across a reload and contacts only basemap hosts', async ({ p
     (host) => !/arcgisonline\.com$|openstreetmap\.org$/.test(host),
   );
   expect(unexpected).toEqual([]);
+});
+
+test.describe('filtering the field list', () => {
+  /** Four fields, three of them missing attributes and one fully named. */
+  async function importAndNameOne(page: Page) {
+    await page.setInputFiles('input[type=file]', FILES);
+    const dialog = page.getByRole('dialog', { name: 'Import boundaries' });
+    for (const target of ['client', 'farm', 'field']) {
+      await dialog.getByLabel(`${target} column`).selectOption('');
+    }
+    await page.getByRole('button', { name: 'Add to workspace' }).click();
+    await page.getByRole('button', { name: 'Select all', exact: true }).click();
+    await page.getByRole('button', { name: 'Combine into one field' }).click();
+    await page.locator('body').click();
+    await attributeCell(page, 'client').first().fill('Acme');
+    await attributeCell(page, 'farm').first().fill('Home');
+    await attributeCell(page, 'field').first().fill('Long Acre');
+  }
+
+  test('shows only the fields that still need work', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('input[type=file]', FILES);
+    await page.getByRole('button', { name: 'Add to workspace' }).click();
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(4);
+
+    // Only the KML's Church Field arrives with all three attributes filled; the other
+    // three are missing something, so three rows are blocked and one is clean.
+    const blocking = page.getByRole('button', { name: /^Blocking/ });
+    await expect(blocking).toHaveText(/3/);
+    await blocking.click();
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(3);
+
+    const clean = page.getByRole('button', { name: /^Clean/ });
+    await clean.click();
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(1);
+    await expect(page.locator('input[aria-label="Client"]').first()).toHaveValue('Bell Farms');
+
+    // Filling a blocked row in moves it across, and the counts follow.
+    await page.getByRole('button', { name: /^All/ }).click();
+    await page.locator('input[aria-label="Client"][data-empty="true"]').first().fill('Acme');
+    await page.locator('input[aria-label="Farm"][data-empty="true"]').first().fill('Home');
+    await expect(clean).toHaveText(/2/);
+    await clean.click();
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(2);
+  });
+
+  test('marks a warning reviewed and takes it back off the list', async ({ page }) => {
+    await page.goto('/');
+    await importAndNameOne(page);
+
+    // One of the fixtures is a season-specific name, which is a warning rather than a block.
+    await attributeCell(page, 'field').first().fill('Wheat 2024');
+    const warning = page.locator('article', { hasText: 'season-specific' });
+    await expect(warning).toBeVisible();
+    await expect(page.getByRole('button', { name: /^1 to review/ })).toBeVisible();
+
+    await warning.getByRole('button', { name: 'Mark reviewed' }).click();
+    await expect(warning).toBeHidden();
+    await expect(page.getByText('0 to review')).toBeVisible();
+
+    // The reviewed section keeps it, and un-reviewing brings it back to the working list.
+    await page.getByRole('button', { name: '1 reviewed' }).click();
+    const reviewed = page.locator('article', { hasText: 'season-specific' });
+    await reviewed.getByRole('button', { name: 'Un-review' }).click();
+    await expect(page.getByRole('button', { name: /^1 to review/ })).toBeVisible();
+  });
+});
+
+test.describe('language', () => {
+  test('switches the whole interface and switches back', async ({ page }) => {
+    await page.goto('/');
+    await expect(
+      page.getByRole('heading', { name: 'Prepare field boundaries for CropForce' }),
+    ).toBeVisible();
+
+    await page.getByRole('button', { name: 'Language' }).click();
+    await page.getByRole('option', { name: 'Português (BR)' }).click();
+
+    await expect(page.getByRole('heading', { name: /Prepare contornos/ })).toBeVisible();
+    await expect(page.getByText('Verificações de qualidade')).toBeVisible();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
+
+    await page.getByRole('button', { name: 'Idioma' }).click();
+    await page.getByRole('option', { name: 'Español (LATAM)' }).click();
+    await expect(page.getByRole('heading', { name: /Prepare contornos de lotes/ })).toBeVisible();
+    await expect(page.getByText('Controles de calidad')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Idioma' }).click();
+    await page.getByRole('option', { name: 'English' }).click();
+    await expect(
+      page.getByRole('heading', { name: 'Prepare field boundaries for CropForce' }),
+    ).toBeVisible();
+  });
+
+  test('reports quality flags in the chosen language', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('input[type=file]', FILES);
+    await page.getByRole('button', { name: 'Add to workspace' }).click();
+    await expect(page.locator('article', { hasText: 'attribute' }).first()).toBeVisible();
+
+    await page.getByRole('button', { name: 'Language' }).click();
+    await page.getByRole('option', { name: 'Español (LATAM)' }).click();
+
+    await expect(page.locator('article', { hasText: 'atributo' }).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Exportar shapefile combinado para CropForce' })).toBeVisible();
+  });
+
+  test('keeps the exported columns named in English whatever the interface says', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await page.setInputFiles('input[type=file]', FILES);
+    await page.getByRole('button', { name: 'Add to workspace' }).click();
+
+    await page.getByRole('button', { name: 'Language' }).click();
+    await page.getByRole('option', { name: 'Português (BR)' }).click();
+
+    // The table headers name the DBF columns, so they must not be translated.
+    await expect(page.getByRole('columnheader', { name: 'Client' })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: 'Farm' })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: 'Field' })).toBeVisible();
+  });
 });

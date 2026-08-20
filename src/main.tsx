@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+import { LanguageProvider } from './i18n';
 
 // Vendor stylesheets are imported here rather than from index.css so each stays a
 // module of its own: the build strips Geoman's hidden-toolbar rules on the way past.
@@ -13,6 +14,8 @@ if (!root) throw new Error('Missing #root element.');
 
 createRoot(root).render(
   <StrictMode>
-    <App />
+    <LanguageProvider>
+      <App />
+    </LanguageProvider>
   </StrictMode>,
 );
