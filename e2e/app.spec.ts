@@ -321,6 +321,118 @@ test('resolves an overlap between two fields and undoes the clip', async ({ page
   await expect(page.locator('article', { hasText: 'overlaps' })).toBeVisible();
 });
 
+test.describe('bulk naming', () => {
+  /** Imports with mapping on, so each source polygon arrives as its own named field. */
+  async function importAsFields(page: Page) {
+    await page.setInputFiles('input[type=file]', FILES);
+    await page.getByRole('button', { name: 'Add to workspace' }).click();
+    await expect(page.locator('input[aria-label="field"]')).toHaveCount(4);
+  }
+
+  const clientValues = (page: Page) =>
+    page
+      .locator('input[aria-label="client"]')
+      .evaluateAll((inputs) => (inputs as HTMLInputElement[]).map((input) => input.value));
+
+  test('applies one client and farm across every ticked field', async ({ page }) => {
+    await page.goto('/');
+    await importAsFields(page);
+
+    await page.getByRole('checkbox', { name: 'Select all fields' }).check();
+    await expect(page.getByText('4 fields ticked')).toBeVisible();
+
+    await page.locator('input[aria-label="Client for all ticked fields"]').fill('Ferme SA');
+    await page.locator('input[aria-label="Farm for all ticked fields"]').fill('Nord');
+    await page.getByRole('button', { name: 'Apply' }).click();
+
+    expect(await clientValues(page)).toEqual(['Ferme SA', 'Ferme SA', 'Ferme SA', 'Ferme SA']);
+    await expect(page.locator('input[aria-label="farm"]').first()).toHaveValue('Nord');
+    // The per-row field names are untouched by a bulk client change.
+    const fieldNames = await page
+      .locator('input[aria-label="field"]')
+      .evaluateAll((inputs) => (inputs as HTMLInputElement[]).map((input) => input.value).sort());
+    expect(fieldNames).toEqual(['Bottom Meadow', 'Church Field', 'Parcelle 1', 'Two Halves']);
+  });
+
+  test('touches only the fields that are ticked', async ({ page }) => {
+    await page.goto('/');
+    await importAsFields(page);
+
+    const ticks = page.locator('input[aria-label^="Select "][aria-label$="for bulk editing"]');
+    await ticks.nth(0).check();
+    await ticks.nth(2).check();
+    await expect(page.getByText('2 fields ticked')).toBeVisible();
+
+    await page.locator('input[aria-label="Client for all ticked fields"]').fill('Acme');
+    await page.getByRole('button', { name: 'Apply' }).click();
+
+    const values = await clientValues(page);
+    expect(values[0]).toBe('Acme');
+    expect(values[2]).toBe('Acme');
+    expect(values[1]).not.toBe('Acme');
+    expect(values[3]).not.toBe('Acme');
+  });
+
+  test('is one history entry, so a single undo reverses the whole batch', async ({ page }) => {
+    await page.goto('/');
+    await importAsFields(page);
+
+    const before = await clientValues(page);
+    await page.getByRole('checkbox', { name: 'Select all fields' }).check();
+    await page.locator('input[aria-label="Client for all ticked fields"]').fill('Ferme SA');
+    await page.getByRole('button', { name: 'Apply' }).click();
+    expect(await clientValues(page)).not.toEqual(before);
+
+    await page.keyboard.press('Control+z');
+    expect(await clientValues(page)).toEqual(before);
+  });
+
+  test('does nothing while both boxes are empty', async ({ page }) => {
+    await page.goto('/');
+    await importAsFields(page);
+    await page.getByRole('checkbox', { name: 'Select all fields' }).check();
+    await expect(page.getByRole('button', { name: 'Apply' })).toBeDisabled();
+  });
+});
+
+test.describe('zoom to my location', () => {
+  test.use({ geolocation: { latitude: 48.8566, longitude: 2.3522 }, permissions: ['geolocation'] });
+
+  test('centres the map on the reported position and marks it', async ({ page }) => {
+    await page.goto('/');
+    await importFixtures(page);
+
+    await page.getByRole('button', { name: 'Zoom to my location' }).click();
+
+    // A dot with an accuracy ring lands on the map, and the view zooms in to it.
+    await expect(page.locator('.location-dot')).toBeVisible();
+    await expect(page.locator('.location-accuracy')).toHaveCount(1);
+    await expect(page.locator('.leaflet-control-scale-line').first()).toHaveText(/\bm$/);
+  });
+});
+
+test('reports a refused location rather than failing silently', async ({ page }) => {
+  // The refusal is stubbed rather than driven through Chromium's permission prompt,
+  // which under automation neither grants nor rejects promptly.
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: {
+        getCurrentPosition: (_ok: unknown, fail: (error: unknown) => void) =>
+          fail({ code: 1, message: 'User denied Geolocation' }),
+        watchPosition: () => 0,
+        clearWatch: () => {},
+      },
+    });
+  });
+  await page.goto('/');
+  await importFixtures(page);
+
+  await page.getByRole('button', { name: 'Zoom to my location' }).click();
+  await expect(page.getByText(/Could not get your location/)).toBeVisible();
+  await expect(page.locator('.location-dot')).toHaveCount(0);
+});
+
 test('keeps nothing across a reload and contacts only basemap hosts', async ({ page }) => {
   await page.goto('/');
   await importFixtures(page);

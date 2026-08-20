@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FeatureId, FieldId, QAFlag, WField, Workspace } from '../types';
 import { areaHa, formatHa } from '../lib/geo';
-import { fieldGeometries } from '../lib/qa';
+import { describeField, fieldGeometries } from '../lib/qa';
 import { UNGROUPED_COLOR, fieldColor } from '../lib/colors';
 import { Button, InfoDot, PanelHeader } from './ui';
 
@@ -24,6 +24,7 @@ export interface LeftPanelProps {
   onSelectFeature: (id: FeatureId | null, additive: boolean) => void;
   onSelectMany: (ids: FeatureId[]) => void;
   onUpdateField: (id: FieldId, patch: Partial<Omit<WField, 'id'>>) => void;
+  onBulkUpdateFields: (ids: FieldId[], patch: Partial<Omit<WField, 'id'>>) => void;
   onCombine: () => void;
   onAssign: (fieldId: FieldId | null) => void;
   onUngroupField: (id: FieldId) => void;
@@ -37,6 +38,8 @@ export interface LeftPanelProps {
 export default function LeftPanel(props: LeftPanelProps) {
   const { workspace, selection } = props;
   const [expanded, setExpanded] = useState<ReadonlySet<FieldId>>(new Set());
+  /** Fields ticked for bulk attribute editing. Separate from the polygon selection. */
+  const [checked, setChecked] = useState<ReadonlySet<FieldId>>(new Set());
 
   const fields = useMemo(() => fieldGeometries(workspace), [workspace]);
   const ungrouped = useMemo(
@@ -55,6 +58,21 @@ export default function LeftPanel(props: LeftPanelProps) {
 
   const totalHa = fields.reduce((sum, entry) => sum + entry.areaHa, 0);
   const selectedIds = [...selection];
+
+  // A field that has been deleted or ungrouped must not stay ticked invisibly.
+  const liveFieldIds = useMemo(() => new Set(fields.map((entry) => entry.field.id)), [fields]);
+  const checkedIds = useMemo(
+    () => [...checked].filter((id) => liveFieldIds.has(id)),
+    [checked, liveFieldIds],
+  );
+
+  const toggleChecked = (id: FieldId) =>
+    setChecked((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   // A field is expanded automatically when the QA panel sends focus to one of its cells.
   useEffect(() => {
@@ -92,15 +110,39 @@ export default function LeftPanel(props: LeftPanelProps) {
             {/* Fixed widths so a long farm name cannot squeeze the field name, which is
                 the column people actually read the table by. */}
             <colgroup>
+              <col className="w-6" />
               <col className="w-7" />
-              <col className="w-[22%]" />
-              <col className="w-[20%]" />
+              <col className="w-[21%]" />
+              <col className="w-[19%]" />
               <col />
               <col className="w-14" />
-              <col className="w-16" />
+              <col className="w-14" />
             </colgroup>
             <thead className="sticky top-0 z-10 bg-ink-850">
               <tr className="text-[10px] uppercase tracking-wide text-ink-400">
+                <th className="border-b border-ink-800 py-1.5 pl-1.5">
+                  <input
+                    type="checkbox"
+                    className="h-3 w-3 accent-crop-500 align-middle"
+                    aria-label="Select all fields"
+                    title="Select every field for bulk editing"
+                    checked={checkedIds.length > 0 && checkedIds.length === fields.length}
+                    ref={(node) => {
+                      // Partly-ticked reads as indeterminate rather than as "none ticked".
+                      if (node) {
+                        node.indeterminate =
+                          checkedIds.length > 0 && checkedIds.length < fields.length;
+                      }
+                    }}
+                    onChange={(event) =>
+                      setChecked(
+                        event.target.checked
+                          ? new Set(fields.map((entry) => entry.field.id))
+                          : new Set(),
+                      )
+                    }
+                  />
+                </th>
                 <th className="border-b border-ink-800 py-1.5" />
                 <th className="border-b border-ink-800 px-1 py-1.5 text-left font-semibold">Client</th>
                 <th className="border-b border-ink-800 px-1 py-1.5 text-left font-semibold">Farm</th>
@@ -123,6 +165,8 @@ export default function LeftPanel(props: LeftPanelProps) {
                     memberSelected={memberSelected}
                     blockingCount={blocking}
                     expanded={expanded.has(entry.field.id)}
+                    checked={checked.has(entry.field.id)}
+                    onCheck={() => toggleChecked(entry.field.id)}
                     focus={
                       props.attributeFocus?.fieldId === entry.field.id
                         ? props.attributeFocus
@@ -144,7 +188,7 @@ export default function LeftPanel(props: LeftPanelProps) {
             </tbody>
             <tfoot>
               <tr className="text-[11px] text-ink-400">
-                <td colSpan={4} className="border-t border-ink-800 px-2 py-1.5">
+                <td colSpan={5} className="border-t border-ink-800 px-2 py-1.5">
                   {fields.length} field{fields.length === 1 ? '' : 's'} to export
                 </td>
                 <td className="border-t border-ink-800 px-1.5 py-1.5 text-right tabular-nums text-ink-100">
@@ -195,6 +239,14 @@ export default function LeftPanel(props: LeftPanelProps) {
         )}
       </div>
 
+      {checkedIds.length > 0 && (
+        <BulkAttributeBar
+          count={checkedIds.length}
+          onApply={(patch) => props.onBulkUpdateFields(checkedIds, patch)}
+          onClear={() => setChecked(new Set())}
+        />
+      )}
+
       {selectedIds.length > 0 && (
         <SelectionBar
           count={selectedIds.length}
@@ -225,6 +277,9 @@ interface FieldRowProps {
   memberSelected: boolean;
   blockingCount: number;
   expanded: boolean;
+  /** Ticked for bulk attribute editing. Independent of the polygon selection. */
+  checked: boolean;
+  onCheck: () => void;
   focus: AttributeFocus | null;
   workspace: Workspace;
   selection: ReadonlySet<FeatureId>;
@@ -249,6 +304,15 @@ function FieldRow(props: FieldRowProps) {
           ${props.memberSelected ? 'bg-ink-800' : 'hover:bg-ink-850'}`}
       >
         <td className="py-0.5 pl-1.5">
+          <input
+            type="checkbox"
+            className="h-3 w-3 accent-crop-500 align-middle"
+            checked={props.checked}
+            onChange={props.onCheck}
+            aria-label={`Select ${describeField(field)} for bulk editing`}
+          />
+        </td>
+        <td className="py-0.5">
           <button
             type="button"
             onClick={props.onToggle}
@@ -310,7 +374,7 @@ function FieldRow(props: FieldRowProps) {
 
       {props.expanded && (
         <tr className="border-b border-ink-850 bg-ink-950/40">
-          <td colSpan={6} className="px-2 py-1.5">
+          <td colSpan={7} className="px-2 py-1.5">
             <ul className="mb-1.5 space-y-0.5">
               {members.length === 0 && (
                 <li className="px-1 py-1 text-[11px] text-red-300">
@@ -429,6 +493,97 @@ function FeatureRow({
         <circle cx="7" cy="7" r="4.5" />
         <path d="M10.5 10.5L14 14" />
       </IconButton>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Bulk attribute editing                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Applies one Client and/or Farm name across every ticked field at once.
+ *
+ * Field is deliberately absent: Client and Farm are shared by design and retyping
+ * them per row is where inconsistent spelling creeps in, whereas a Field name
+ * identifies one field and giving fifty of them the same name would be a mistake,
+ * not a shortcut. Blank boxes are left alone, so Client can be set across a batch
+ * without disturbing the Farm names already in it.
+ */
+function BulkAttributeBar({
+  count,
+  onApply,
+  onClear,
+}: {
+  count: number;
+  onApply: (patch: Partial<Omit<WField, 'id'>>) => void;
+  onClear: () => void;
+}) {
+  const [client, setClient] = useState('');
+  const [farm, setFarm] = useState('');
+  const nothingToApply = client.trim() === '' && farm.trim() === '';
+
+  const apply = () => {
+    if (nothingToApply) return;
+    const patch: Partial<Omit<WField, 'id'>> = {};
+    if (client.trim() !== '') patch.client = client.trim();
+    if (farm.trim() !== '') patch.farm = farm.trim();
+    onApply(patch);
+    setClient('');
+    setFarm('');
+  };
+
+  return (
+    <div className="shrink-0 space-y-2 border-t border-ink-700 bg-ink-850 px-3 py-2.5">
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] font-medium text-ink-100">
+          {count} field{count === 1 ? '' : 's'} ticked
+        </span>
+        <InfoDot
+          label="Bulk naming"
+          text={
+            'Set the same Client or Farm across every ticked field in one go. A box left ' +
+            'empty is not applied, so you can set the Client without touching the Farm ' +
+            'names already there. Field names stay per-row, because each one names a ' +
+            'different field.'
+          }
+        />
+        <button
+          type="button"
+          onClick={onClear}
+          className="ml-auto text-[10px] text-ink-400 underline-offset-2 hover:text-crop-300 hover:underline"
+        >
+          Clear ticks
+        </button>
+      </div>
+
+      <div className="flex gap-1.5">
+        <input
+          value={client}
+          onChange={(event) => setClient(event.target.value)}
+          onKeyDown={(event) => event.key === 'Enter' && apply()}
+          placeholder="Client for all"
+          maxLength={30}
+          spellCheck={false}
+          aria-label="Client for all ticked fields"
+          className="min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-950 px-2 py-1.5
+            text-xs text-ink-100 placeholder:text-ink-600 focus:border-crop-500 focus:outline-none"
+        />
+        <input
+          value={farm}
+          onChange={(event) => setFarm(event.target.value)}
+          onKeyDown={(event) => event.key === 'Enter' && apply()}
+          placeholder="Farm for all"
+          maxLength={30}
+          spellCheck={false}
+          aria-label="Farm for all ticked fields"
+          className="min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-950 px-2 py-1.5
+            text-xs text-ink-100 placeholder:text-ink-600 focus:border-crop-500 focus:outline-none"
+        />
+        <Button tone="primary" onClick={apply} disabled={nothingToApply}>
+          Apply
+        </Button>
+      </div>
     </div>
   );
 }

@@ -16,6 +16,7 @@ import {
   setGeometry,
   ungroupField,
   updateField,
+  updateFields,
 } from '../state/ops';
 import { __historyReducer, __initialHistory } from '../state/history';
 import {
@@ -152,6 +153,79 @@ describe('field grouping', () => {
       farm: 'Manor',
       field: 'Church Field',
     });
+  });
+});
+
+describe('bulk attribute editing', () => {
+  /** Three fields, each with its own name, sharing nothing yet. */
+  function threeFields(): Workspace {
+    let workspace: Workspace = {
+      fields: [],
+      features: [
+        newFeature(square(2.5, 48.8), 'a.kml'),
+        newFeature(square(2.6, 48.8), 'b.kml'),
+        newFeature(square(2.7, 48.8), 'c.kml'),
+      ],
+    };
+    for (const feature of [...workspace.features]) {
+      workspace = combineIntoField(workspace, [feature.id]);
+    }
+    workspace.fields.forEach((field, index) => {
+      workspace = updateField(workspace, field.id, { field: `Block ${index + 1}` });
+    });
+    return workspace;
+  }
+
+  it('applies one client name across every chosen field at once', () => {
+    let workspace = threeFields();
+    const ids = workspace.fields.map((f) => f.id);
+    workspace = updateFields(workspace, ids, { client: 'Ferme SA' });
+
+    expect(workspace.fields.map((f) => f.client)).toEqual(['Ferme SA', 'Ferme SA', 'Ferme SA']);
+    // Field names are per-row and must survive a bulk client change untouched.
+    expect(workspace.fields.map((f) => f.field)).toEqual(['Block 1', 'Block 2', 'Block 3']);
+  });
+
+  it('leaves fields that were not chosen alone', () => {
+    let workspace = threeFields();
+    const [first, , third] = workspace.fields;
+    workspace = updateFields(workspace, [first.id, third.id], { farm: 'Nord' });
+
+    expect(workspace.fields.map((f) => f.farm)).toEqual(['Nord', '', 'Nord']);
+  });
+
+  it('sets client and farm together without disturbing anything else', () => {
+    let workspace = threeFields();
+    workspace = updateFields(workspace, [workspace.fields[0].id], { client: 'Acme', farm: 'Home' });
+
+    expect(workspace.fields[0]).toMatchObject({
+      client: 'Acme',
+      farm: 'Home',
+      field: 'Block 1',
+    });
+  });
+
+  it('does not move any polygon between fields', () => {
+    const workspace = threeFields();
+    const before = workspace.features.map((f) => f.fieldId);
+    const after = updateFields(
+      workspace,
+      workspace.fields.map((f) => f.id),
+      { client: 'Acme' },
+    );
+    expect(after.features.map((f) => f.fieldId)).toEqual(before);
+  });
+
+  it('clears the missing-attribute flags it fills in', () => {
+    let workspace = threeFields();
+    expect(runChecks(workspace).filter((f) => f.kind === 'missing-attributes')).toHaveLength(3);
+
+    workspace = updateFields(
+      workspace,
+      workspace.fields.map((f) => f.id),
+      { client: 'Ferme SA', farm: 'Nord' },
+    );
+    expect(runChecks(workspace).filter((f) => f.kind === 'missing-attributes')).toHaveLength(0);
   });
 });
 

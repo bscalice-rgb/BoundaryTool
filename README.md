@@ -22,6 +22,13 @@ The only network traffic the app makes after loading is basemap tiles from Esri 
 OpenStreetMap if you switch to the street layer). There are no API keys, secrets or
 environment variables anywhere in the project.
 
+One caveat worth stating plainly: the **zoom to my location** button asks your browser
+where you are, and your browser may consult its own location service to answer that —
+which is a request the app neither makes nor sees. Your boundary data is never part of
+it, and the position it returns stays in the tab. Don't press the button if you would
+rather your browser not do that. Geolocation also needs a secure context, so it works on
+`https://` and on `localhost`, and nowhere else.
+
 ## How it works
 
 1. **Drop files.** Anything not already in WGS84 is reprojected on import. If a source
@@ -31,11 +38,14 @@ environment variables anywhere in the project.
    table and one MultiPolygon in the export. It can be built from any number of
    polygons, from any number of source files, with holes cut into any of them. What
    counts as one field is always your decision — the tool never guesses.
-3. **Clean and fix.** The quality panel checks each field and offers two routes for
+3. **Name in bulk where it helps.** Tick several fields and set one Client or Farm name
+   across all of them at once. Field names stay per-row, because each one names a
+   different field.
+4. **Clean and fix.** The quality panel checks each field and offers two routes for
    every flag: an automatic correction, or a manual one that selects the offending
    geometry and arms the right editing tool. Everything, auto-fixes included, is one
    Ctrl+Z away from being undone.
-4. **Export.** One button produces one `.zip` containing `.shp`, `.shx`, `.dbf`, `.prj`
+5. **Export.** One button produces one `.zip` containing `.shp`, `.shx`, `.dbf`, `.prj`
    and `.cpg`, in WGS84, with `Client`, `Farm` and `Field` as 30-character text columns.
 
 ## The data model
@@ -72,6 +82,8 @@ fields, no overlaps, consistent naming — so the tool doubles as guidance.
 
 Draw, vertex edit, move, cut exclusion zones, split with a drawn line, merge, smooth with
 a live preview, and delete. Optional snapping keeps neighbouring fields meeting exactly.
+The map also carries a zoom-to-my-location button, useful when the boundaries you have
+been sent are somewhere you are standing.
 
 Keyboard: `V` select, `E` vertices, `M` move, `D` draw, `H` cut hole, `S` split,
 `G` smooth, `Del` delete selection, `Esc` back to select, `Ctrl/Cmd+Z` undo,

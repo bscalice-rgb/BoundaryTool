@@ -25,6 +25,35 @@ export interface FocusRequest {
   nonce: number;
 }
 
+/**
+ * Builds the "zoom to my location" control. It is a real Leaflet control rather than a
+ * floating React button so it stacks with the zoom buttons and inherits their styling.
+ */
+function locateControl(onClick: () => void): L.Control {
+  const control = new L.Control({ position: 'topleft' });
+  control.onAdd = () => {
+    const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control locate-control');
+    const link = L.DomUtil.create('a', '', container);
+    link.href = '#';
+    link.setAttribute('role', 'button');
+    link.setAttribute('aria-label', 'Zoom to my location');
+    link.title =
+      'Zoom to my location. Your browser asks you for permission first, and may consult ' +
+      'its own location service to answer. Your boundary data is never part of that.';
+    link.innerHTML =
+      '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<circle cx="8" cy="8" r="3.2"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2"/></svg>';
+    L.DomEvent.disableClickPropagation(container);
+    L.DomEvent.on(link, 'click', (event) => {
+      L.DomEvent.stop(event);
+      onClick();
+    });
+    return container;
+  };
+  return control;
+}
+
 export interface MapViewProps {
   workspace: Workspace;
   selection: ReadonlySet<FeatureId>;
@@ -40,6 +69,8 @@ export interface MapViewProps {
   onCutHole: (geometry: Polygon) => void;
   onSplitLine: (line: LineString) => void;
   onGeometryEdited: (featureId: FeatureId, geometry: PolyGeom) => void;
+  /** Surfaced when the browser refuses or fails to report a position. */
+  onLocationError: (message: string) => void;
 }
 
 export default function MapView(props: MapViewProps) {
@@ -56,6 +87,8 @@ export default function MapView(props: MapViewProps) {
   const previewLayerRef = useRef<L.GeoJSON | null>(null);
   const tileLayersRef = useRef<Partial<Record<Basemap, L.TileLayer>>>({});
   const didFitRef = useRef(false);
+  /** The "you are here" dot and its accuracy ring, replaced on each locate. */
+  const locationLayerRef = useRef<L.LayerGroup | null>(null);
 
   // Handlers are read through a ref so Leaflet callbacks never close over stale props.
   const propsRef = useRef(props);
@@ -83,6 +116,43 @@ export default function MapView(props: MapViewProps) {
     tileLayersRef.current.imagery!.addTo(map);
 
     L.control.scale({ metric: true, imperial: false, position: 'bottomleft' }).addTo(map);
+
+    locateControl(() => {
+      map.getContainer().classList.add('locating');
+      // Leaflet's own wrapper around navigator.geolocation: nothing is sent anywhere by
+      // the app, and the position never leaves this tab.
+      map.locate({ setView: true, maxZoom: 16, enableHighAccuracy: true, timeout: 15_000 });
+    }).addTo(map);
+
+    map.on('locationfound', (event: L.LocationEvent) => {
+      map.getContainer().classList.remove('locating');
+      locationLayerRef.current?.remove();
+      locationLayerRef.current = L.layerGroup([
+        L.circle(event.latlng, {
+          radius: Math.max(event.accuracy, 5),
+          className: 'location-accuracy',
+          color: '#38bdf8',
+          weight: 1,
+          fillColor: '#38bdf8',
+          fillOpacity: 0.12,
+          interactive: false,
+        }),
+        L.circleMarker(event.latlng, {
+          radius: 5,
+          className: 'location-dot',
+          color: '#ffffff',
+          weight: 2,
+          fillColor: '#38bdf8',
+          fillOpacity: 1,
+          interactive: false,
+        }),
+      ]).addTo(map);
+    });
+
+    map.on('locationerror', (event: L.ErrorEvent) => {
+      map.getContainer().classList.remove('locating');
+      propsRef.current.onLocationError(event.message);
+    });
 
     map.pm.setGlobalOptions({ snappable: true, snapDistance: SNAP_DISTANCE });
 

@@ -26,6 +26,7 @@ import {
   setGeometry,
   ungroupField,
   updateField,
+  updateFields,
 } from './state/ops';
 import { type ImportReport, importFiles } from './lib/import';
 import { areaHa, bboxOf, simplifyMeters, splitByLine, vertexCount } from './lib/geo';
@@ -618,6 +619,13 @@ export default function App() {
             onUpdateField={(id, patch) =>
               apply('Edit attributes', (current) => updateField(current, id, patch))
             }
+            onBulkUpdateFields={(ids, patch) => {
+              const columns = Object.keys(patch).join(' and ');
+              apply(`Set ${columns} on ${ids.length} fields`, (current) =>
+                updateFields(current, ids, patch),
+              );
+              toast(`Applied ${columns} to ${ids.length} field${ids.length === 1 ? '' : 's'}.`);
+            }}
             onCombine={combineSelection}
             onAssign={assignSelection}
             onUngroupField={(id) =>
@@ -667,6 +675,9 @@ export default function App() {
               onCutHole={handleCutHole}
               onSplitLine={handleSplitLine}
               onGeometryEdited={handleGeometryEdited}
+              onLocationError={(message) =>
+                toast(`Could not get your location: ${message}.`, 'error')
+              }
             />
 
             {tool === 'simplify' && selection.size > 0 && (
