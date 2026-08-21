@@ -30,6 +30,8 @@ type Action =
   | { type: 'apply'; label: string; fn: (workspace: Workspace) => Workspace }
   | { type: 'undo' }
   | { type: 'redo' }
+  /** Repeats undo or redo `Math.abs(delta)` times, for jumping in the history list. */
+  | { type: 'jump'; delta: number }
   | { type: 'clear' };
 
 const initialState = (): HistoryState => ({
@@ -90,6 +92,18 @@ function reducer(state: HistoryState, action: Action): HistoryState {
         futureLabels,
       };
     }
+    case 'jump': {
+      // Folding the single steps keeps one definition of what undo and redo mean,
+      // rather than a second, subtly different, bulk implementation.
+      const step: Action = { type: action.delta < 0 ? 'undo' : 'redo' };
+      let next = state;
+      for (let n = 0; n < Math.abs(action.delta); n++) {
+        const moved = reducer(next, step);
+        if (moved === next) break;
+        next = moved;
+      }
+      return next;
+    }
     case 'clear':
       return initialState();
     default:
@@ -104,10 +118,16 @@ export interface WorkspaceHistory {
   undo: () => void;
   redo: () => void;
   clear: () => void;
+  /** Jumps `n` entries back (negative) or forward (positive) in one go. */
+  jump: (delta: number) => void;
   canUndo: boolean;
   canRedo: boolean;
   undoLabel: string | null;
   redoLabel: string | null;
+  /** Labels of everything already done, oldest first. */
+  pastLabels: readonly string[];
+  /** Labels of everything undone and still redoable, next first. */
+  futureLabels: readonly string[];
 }
 
 export function useWorkspaceHistory(): WorkspaceHistory {
@@ -120,6 +140,7 @@ export function useWorkspaceHistory(): WorkspaceHistory {
   );
   const undo = useCallback(() => dispatch({ type: 'undo' }), []);
   const redo = useCallback(() => dispatch({ type: 'redo' }), []);
+  const jump = useCallback((delta: number) => dispatch({ type: 'jump', delta }), []);
   const clear = useCallback(() => dispatch({ type: 'clear' }), []);
 
   return useMemo(
@@ -128,13 +149,16 @@ export function useWorkspaceHistory(): WorkspaceHistory {
       apply,
       undo,
       redo,
+      jump,
       clear,
       canUndo: state.past.length > 0,
       canRedo: state.future.length > 0,
       undoLabel: state.lastAction,
       redoLabel: state.nextAction,
+      pastLabels: state.pastLabels,
+      futureLabels: state.futureLabels,
     }),
-    [state, apply, undo, redo, clear],
+    [state, apply, undo, redo, jump, clear],
   );
 }
 

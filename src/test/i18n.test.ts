@@ -11,6 +11,7 @@ import {
 } from '../i18n/translator';
 import type { Lang } from '../i18n/translator';
 import { runChecks } from '../lib/qa';
+import { fieldColor } from '../lib/colors';
 import { newFeature, newField } from '../state/ops';
 import { poly, squareRing } from './fixtures';
 
@@ -145,5 +146,27 @@ describe('language metadata', () => {
     expect(LANGUAGES.pt.label).toBe('Português (BR)');
     expect(LANGUAGES.es.label).toBe('Español (LATAM)');
     expect(LANGUAGES.en.label).toBe('English');
+  });
+});
+
+describe('field colours', () => {
+  it('gives each of the first ten fields its own hue', () => {
+    const first = Array.from({ length: 10 }, (_, index) => fieldColor(index));
+    expect(new Set(first).size).toBe(10);
+  });
+
+  // Thirty fields on one screen is an ordinary batch, and a repeat of the same blue
+  // two rows apart is the sort of thing that gets a boundary put in the wrong field.
+  it('shifts lightness on later passes rather than repeating a colour', () => {
+    const thirty = Array.from({ length: 30 }, (_, index) => fieldColor(index));
+    expect(new Set(thirty).size).toBe(30);
+    expect(fieldColor(0)).not.toBe(fieldColor(10));
+    expect(fieldColor(10)).not.toBe(fieldColor(20));
+  });
+
+  it('is stable for a given position', () => {
+    expect(fieldColor(3)).toBe(fieldColor(3));
+    expect(fieldColor(0)).toMatch(/^#[0-9a-f]{6}$/);
+    expect(fieldColor(17)).toMatch(/^#[0-9a-f]{6}$/);
   });
 });

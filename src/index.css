@@ -6,9 +6,16 @@
   --color-ink-850: #16202f;
   --color-ink-800: #1c2836;
   --color-ink-700: #2b3a4d;
-  --color-ink-600: #3d5064;
-  --color-ink-400: #7d8fa3;
-  --color-ink-300: #a8b6c5;
+  --color-ink-600: #4d6379;
+  /*
+   * The two greys most of the secondary text is written in. They were a step darker
+   * and fell below 4.5:1 against the panel background at 10-11px, which is the size
+   * most of this interface is set in.
+   */
+  --color-ink-500: #8496a9;
+  --color-ink-400: #94a5b8;
+  --color-ink-300: #b7c3d0;
+  --color-ink-200: #ccd5df;
   --color-ink-100: #e3e9ef;
   --color-crop-500: #4ba350;
   --color-crop-400: #62c168;
@@ -158,9 +165,21 @@ body {
   background: var(--color-ink-950);
   border-color: var(--color-crop-500);
 }
+/*
+ * An empty attribute is not a mistake — it is a box you have not filled in yet, and
+ * three red boxes per row on a freshly imported file reads as a disaster before the
+ * user has done anything at all. Empty is dashed and neutral; red is reserved for
+ * "you asked to export and this is what stopped it".
+ */
 .field-input[data-empty='true'] {
+  border-style: dashed;
+  border-color: var(--color-ink-600);
+}
+
+.field-input[data-blocked='true'] {
   background: rgb(220 38 38 / 0.14);
-  border-color: rgb(248 113 113 / 0.45);
+  border-style: solid;
+  border-color: rgb(248 113 113 / 0.55);
 }
 
 input[type='range'] {
@@ -191,4 +210,67 @@ input[type='range'] {
 
 .scoped-row > td:first-child {
   box-shadow: inset 3px 0 0 var(--color-crop-400);
+}
+
+/* ------------------------------------------------------------ panel resizing */
+
+/*
+ * The map is where the work happens, so both side panels can be dragged narrower or
+ * folded away entirely. The handle is a hair wide but claims a comfortable hit area
+ * through its ::after, which is the usual trick for a splitter you can actually grab.
+ */
+.panel-resizer {
+  position: relative;
+  width: 1px;
+  flex-shrink: 0;
+  background: var(--color-ink-800);
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.panel-resizer::after {
+  content: '';
+  position: absolute;
+  inset: 0 -4px;
+}
+
+.panel-resizer:hover,
+.panel-resizer:focus-visible,
+.panel-resizer[data-dragging='true'] {
+  background: var(--color-crop-400);
+  outline: none;
+}
+
+/* While a splitter is being dragged the pointer must not become a text caret. */
+body[data-resizing='true'] {
+  cursor: col-resize;
+  user-select: none;
+}
+
+/* --------------------------------------------------------------- map hover */
+
+/*
+ * Pointing at a flag lights up the boundary it is about, without changing what is
+ * selected. Selection is a commitment; this is just looking.
+ */
+.leaflet-interactive.feature-hover {
+  filter: drop-shadow(0 0 4px rgb(255 255 255 / 0.9));
+}
+
+.field-label {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  text-shadow:
+    0 0 3px rgb(0 0 0 / 0.95),
+    0 1px 2px rgb(0 0 0 / 0.9);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.field-label::before {
+  display: none;
 }

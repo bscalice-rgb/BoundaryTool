@@ -101,6 +101,38 @@ call anything.
 6. **Export.** One button produces one `.zip` containing `.shp`, `.shx`, `.dbf`, `.prj`
    and `.cpg`, in WGS84, with `Client`, `Farm` and `Field` as 30-character text columns.
 
+## Getting out of your own way
+
+The map is the part of this tool that benefits from every pixel it can get, so neither
+side panel holds a fixed share of the window. Drag either splitter to resize, double-click
+it to fold the panel away, or use the chevron in the panel's own header; a folded panel
+leaves a rail behind carrying its name and its worst number, so nothing goes quiet just
+because it is out of sight. The splitters take arrow keys as well as the mouse. Neither
+panel is allowed to squeeze the map below a width it can still be worked in, and a window
+narrowed under them pulls them in rather than leaving a sliver.
+
+An empty Client, Farm or Field box is dashed and grey, not red. It is a box you have not
+filled in yet — three red boxes per row on a freshly imported file is a tool shouting
+about nothing. They turn red the first time you ask to export and are stopped, which is
+when "empty" actually becomes "this is the problem".
+
+The header carries one line about the next thing to do rather than a permanent
+reassurance: *3 fields need attention before they can be exported*, then *All 4 fields
+ready to export*. The privacy note it replaced is one hover away, in the info dot beside
+it. Above the field table a bar fills in as fields become exportable, so a list of
+complaints also says how close the end is.
+
+Pointing at a flag lights up the boundary it is about, and highlights the row it belongs
+to, without changing what is selected — selecting is a commitment, pointing is just
+looking. It works in both directions. Zoom in past about a field's width and the map
+labels each boundary with its field name and area, which is what makes a screen of thirty
+similar-looking blocks navigable; the colours cycle through ten hues and then through
+lightness, so thirty fields all have their own.
+
+`?` opens the keyboard shortcuts. The undo and redo buttons have a third button beside
+them listing recent actions, so a bulk fix that went wrong can be stepped back past in
+one click rather than ten.
+
 ## The data model
 
 Two levels, deliberately kept apart:
@@ -167,7 +199,7 @@ showing you a blank grid. The street layer goes one level deeper where that help
 
 Keyboard: `V` select, `E` vertices, `M` move, `D` draw, `H` cut hole, `S` split,
 `G` smooth, `Del` delete selection, `Esc` back to select, `Ctrl/Cmd+Z` undo,
-`Ctrl/Cmd+Shift+Z` redo.
+`Ctrl/Cmd+Shift+Z` redo, `?` for this list in the app.
 
 ## Supported input
 

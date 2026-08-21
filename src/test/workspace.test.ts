@@ -682,6 +682,45 @@ describe('undo and redo', () => {
 /* Export gating and output                                                    */
 /* -------------------------------------------------------------------------- */
 
+describe('jumping through the history', () => {
+  const apply = (state: ReturnType<typeof __initialHistory>, label: string, fn: (w: Workspace) => Workspace) =>
+    __historyReducer(state, { type: 'apply', label, fn });
+
+  const threeSteps = () => {
+    let state = __initialHistory();
+    state = apply(state, 'One', (w) => addDrawnFeature(w, square(2.5, 48.8)));
+    state = apply(state, 'Two', (w) => addDrawnFeature(w, square(2.6, 48.8)));
+    state = apply(state, 'Three', (w) => addDrawnFeature(w, square(2.7, 48.8)));
+    return state;
+  };
+
+  it('undoes several entries in one go, including the one clicked', () => {
+    const state = __historyReducer(threeSteps(), { type: 'jump', delta: -2 });
+    expect(state.present.features).toHaveLength(1);
+    expect(state.pastLabels).toEqual(['One']);
+    expect(state.futureLabels).toEqual(['Two', 'Three']);
+  });
+
+  it('redoes several entries in one go', () => {
+    let state = __historyReducer(threeSteps(), { type: 'jump', delta: -3 });
+    expect(state.present.features).toHaveLength(0);
+    state = __historyReducer(state, { type: 'jump', delta: 2 });
+    expect(state.present.features).toHaveLength(2);
+    expect(state.pastLabels).toEqual(['One', 'Two']);
+  });
+
+  it('stops at the end rather than running off it', () => {
+    const state = __historyReducer(threeSteps(), { type: 'jump', delta: -99 });
+    expect(state.present.features).toHaveLength(0);
+    expect(state.pastLabels).toEqual([]);
+  });
+
+  it('a jump of nothing changes nothing', () => {
+    const before = threeSteps();
+    expect(__historyReducer(before, { type: 'jump', delta: 0 })).toBe(before);
+  });
+});
+
 describe('export gating', () => {
   function readyWorkspace(): Workspace {
     let workspace: Workspace = { fields: [], features: [newFeature(square(2.5, 48.8), 'a.kml')] };

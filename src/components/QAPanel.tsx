@@ -3,6 +3,7 @@ import type { FieldId, FlagKind, QAFlag } from '../types';
 import { useT } from '../i18n';
 import type { StringKey } from '../i18n';
 import { canReview, reviewKey } from '../lib/qa';
+import { PanelToggle } from './SidePanel';
 import { Button, InfoDot, PanelHeader } from './ui';
 
 export interface QAPanelProps {
@@ -27,6 +28,9 @@ export interface QAPanelProps {
   onFixManually: (flag: QAFlag) => void;
   /** Selects the polygons behind these flags and frames them on the map. */
   onSelectFlagged: (flags: QAFlag[]) => void;
+  /** Lights the boundary a flag is about, without disturbing the selection. */
+  onHoverFlag: (flag: QAFlag | null) => void;
+  onToggleCollapsed: () => void;
   onExport: () => void;
 }
 
@@ -102,6 +106,13 @@ export default function QAPanel(props: QAPanelProps) {
     <div className="flex h-full min-h-0 flex-col border-l border-ink-800 bg-ink-900">
       <PanelHeader title={t('qa.title')} count={props.flags.length}>
         <InfoDot label={t('qa.criteriaLabel')} text={t('qa.criteria')} />
+        <PanelToggle
+          side="right"
+          collapsed={false}
+          onToggle={props.onToggleCollapsed}
+          hideLabel={t('panel.hideChecks')}
+          showLabel={t('panel.showChecks')}
+        />
       </PanelHeader>
 
       <div className="shrink-0 border-b border-ink-800 px-3 py-2.5">
@@ -133,16 +144,23 @@ export default function QAPanel(props: QAPanelProps) {
             </button>
           )}
         </div>
-        <Button tone="primary" onClick={props.onExport} className="w-full">
-          {t('qa.export')}
-        </Button>
-        <p className="mt-1.5 text-[10px] leading-relaxed text-ink-400">
+        {/* The counts and the reason come before the button: an export button shouting
+            at the top of a panel that is telling you the export is blocked is the
+            loudest thing on screen saying the least useful thing. */}
+        <p className="mb-2 text-[11px] leading-relaxed text-ink-400">
           {props.fieldCount === 0
             ? t('qa.readyNone')
             : ready
               ? t.n('qa.ready', props.fieldCount)
               : t('qa.blocked')}
         </p>
+        <Button
+          tone={ready ? 'primary' : 'default'}
+          onClick={props.onExport}
+          className="w-full"
+        >
+          {t('qa.export')}
+        </Button>
       </div>
 
       {props.scopeFieldIds.size > 0 && (
@@ -445,6 +463,7 @@ function FlagCard({
   onAutoFix,
   onFixManually,
   onSelectFlagged,
+  onHoverFlag,
   onReview,
   onUnreview,
 }: {
@@ -455,12 +474,19 @@ function FlagCard({
   onPick: (() => void) | null;
 } & Pick<
   QAPanelProps,
-  'onAutoFix' | 'onFixManually' | 'onSelectFlagged' | 'onReview' | 'onUnreview'
+  | 'onAutoFix'
+  | 'onFixManually'
+  | 'onSelectFlagged'
+  | 'onHoverFlag'
+  | 'onReview'
+  | 'onUnreview'
 >) {
   const t = useT();
   const blocking = flag.severity === 'blocking';
   return (
     <article
+      onMouseEnter={() => onHoverFlag(flag)}
+      onMouseLeave={() => onHoverFlag(null)}
       className={`border-b border-ink-850 px-3 py-2.5 ${active ? 'flag-active bg-ink-850' : ''}
         ${picked ? 'bg-ink-850' : ''} ${isReviewed ? 'opacity-60' : ''}`}
     >
@@ -505,7 +531,7 @@ function FlagCard({
         ) : (
           <span
             className="inline-flex items-center rounded-md border border-dashed border-ink-700
-              px-2 py-1.5 text-[11px] text-ink-600"
+              px-2 py-1.5 text-[11px] text-ink-400"
             title={t('qa.noAutoFixHint')}
           >
             {t('qa.noAutoFix')}

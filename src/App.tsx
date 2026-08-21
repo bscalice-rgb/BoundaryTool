@@ -52,7 +52,10 @@ import {
   suggestFileName,
 } from './lib/export';
 import { UNGROUPED_COLOR, fieldColor } from './lib/colors';
+import { describeField } from './lib/qa';
 import MapView, { type FocusRequest } from './components/MapView';
+import { CollapsedRail, PanelResizer, SidePanel } from './components/SidePanel';
+import ShortcutSheet from './components/ShortcutSheet';
 import Toolbar, { HistoryButtons, SmoothingPanel } from './components/Toolbar';
 import LeftPanel, { type AttributeFocus } from './components/LeftPanel';
 import QAPanel from './components/QAPanel';
@@ -63,9 +66,14 @@ import {
   ImportDialog,
   OverlapDialog,
 } from './components/dialogs';
-import { ToastStack, type Toast } from './components/ui';
+import { InfoDot, ToastStack, type Toast } from './components/ui';
 
 const ACCEPTED = '.kml,.kmz,.zip,.geojson,.json,.shp,.shx,.dbf,.prj,.cpg';
+
+/** Panel sizing. The map keeps at least this much room whatever the panels want. */
+const MAP_MIN_WIDTH = 360;
+const FIELDS_MIN = 260;
+const CHECKS_MIN = 240;
 
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -109,6 +117,20 @@ export default function App() {
    * which cannot be selected on the map — can still be worked on.
    */
   const [pinnedFields, setPinnedFields] = useState<ReadonlySet<FieldId>>(new Set());
+  /**
+   * Empty attributes go red only once an export attempt has actually been stopped by
+   * them. Before that they are boxes you have not filled in yet, and colouring every
+   * one of them red on a freshly imported file is shouting about nothing.
+   */
+  const [exportAttempted, setExportAttempted] = useState(false);
+  /** Boundaries lit up by pointing rather than selecting. */
+  const [hoverFeatureIds, setHoverFeatureIds] = useState<ReadonlySet<FeatureId>>(new Set());
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  /** Panel geometry. Held here for the session; nothing about it is stored. */
+  const [fieldsWidth, setFieldsWidth] = useState(460);
+  const [checksWidth, setChecksWidth] = useState(340);
+  const [fieldsCollapsed, setFieldsCollapsed] = useState(false);
+  const [checksCollapsed, setChecksCollapsed] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nonceRef = useRef(0);
@@ -133,6 +155,16 @@ export default function App() {
     workspace.fields.forEach((field, index) => map.set(field.id, fieldColor(index)));
     return map;
   }, [workspace.fields]);
+
+  /** What a polygon is called on the map: its field's name, or nothing if ungrouped. */
+  const labelFor = useCallback(
+    (feature: WFeature) => {
+      if (!feature.fieldId) return '';
+      const field = workspace.fields.find((item) => item.id === feature.fieldId);
+      return field ? describeField(field, t) : '';
+    },
+    [workspace.fields, t],
+  );
 
   const colorFor = useCallback(
     (feature: WFeature) =>
@@ -187,6 +219,16 @@ export default function App() {
   }, []);
 
   const selectMany = useCallback((ids: FeatureId[]) => setSelection(new Set(ids)), []);
+
+  const hoverFeatures = useCallback((ids: FeatureId[]) => {
+    setHoverFeatureIds((current) => {
+      // Leaving one polygon for the next fires an empty update in between; returning
+      // the same set keeps that from re-rendering the map layers for nothing.
+      if (ids.length === 0) return current.size === 0 ? current : new Set();
+      if (ids.length === current.size && ids.every((id) => current.has(id))) return current;
+      return new Set(ids);
+    });
+  }, []);
 
   /**
    * What the quality panel is scoped to. Selecting a field's polygons — from the list,
@@ -602,6 +644,7 @@ export default function App() {
     // The suggested name is re-derived on each open, because the client name it is built
     // from is usually typed in after the first, blocked, attempt to export.
     if (!fileNameEdited) setFileName(suggestFileName(workspace));
+    setExportAttempted(true);
     setExportOpen(true);
   }, [workspace, fileNameEdited, reviewed, t]);
 
@@ -643,9 +686,15 @@ export default function App() {
       if (typing) return;
 
       if (event.key === 'Escape') {
+        setShortcutsOpen(false);
         setTool('select');
         setSelection(new Set());
         setPinnedFields(new Set());
+        return;
+      }
+      if (event.key === '?') {
+        event.preventDefault();
+        setShortcutsOpen((value) => !value);
         return;
       }
       if (event.key === 'Delete' || event.key === 'Backspace') {
@@ -685,22 +734,65 @@ export default function App() {
   /* ---------------------------------------------------------------- render */
 
   const isEmpty = workspace.features.length === 0 && workspace.fields.length === 0;
+  const blockingCount = flags.filter((flag) => flag.severity === 'blocking').length;
+
+  /**
+   * What the header says. One line about the next thing to do, which is more use than
+   * a count of everything at once — the counts are in the panels either side.
+   */
+  const status = useMemo(() => {
+    const ungrouped = workspace.features.filter((f) => f.fieldId === null).length;
+    if (isEmpty) return { tone: 'bg-ink-600', text: t('status.empty') };
+    if (blockingCount > 0) {
+      const blocked = new Set(
+        flags.filter((f) => f.severity === 'blocking').flatMap((f) => f.fieldIds),
+      );
+      return { tone: 'bg-red-400', text: t.n('status.blocked', blocked.size) };
+    }
+    if (ungrouped > 0) return { tone: 'bg-amber-400', text: t.n('status.group', ungrouped) };
+    return { tone: 'bg-crop-400', text: t.n('status.ready', workspace.fields.length) };
+  }, [workspace, flags, blockingCount, isEmpty, t]);
+
+  // Neither panel may squeeze the map below a width it can still be worked in. The
+  // window is measured rather than assumed, because both panels are draggable and the
+  // browser can be resized under them.
+  const [viewportWidth, setViewportWidth] = useState(
+    typeof window === 'undefined' ? 1440 : window.innerWidth,
+  );
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const otherPanel = (collapsed: boolean, width: number) => (collapsed ? 36 : width);
+  const maxFieldsWidth = Math.max(
+    FIELDS_MIN,
+    viewportWidth - MAP_MIN_WIDTH - otherPanel(checksCollapsed, checksWidth),
+  );
+  const maxChecksWidth = Math.max(
+    CHECKS_MIN,
+    viewportWidth - MAP_MIN_WIDTH - otherPanel(fieldsCollapsed, fieldsWidth),
+  );
+
+  // A window narrowed under the panels must not leave a sliver of map behind.
+  useEffect(() => {
+    setFieldsWidth((width) => Math.min(width, maxFieldsWidth));
+    setChecksWidth((width) => Math.min(width, maxChecksWidth));
+  }, [maxFieldsWidth, maxChecksWidth]);
 
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-11 shrink-0 items-center gap-3 border-b border-ink-800 bg-ink-900 px-3">
-        <h1 className="text-sm font-semibold text-ink-100">{t('app.title')}</h1>
-        <span
-          className="hidden items-center gap-1.5 rounded-full border border-ink-700 bg-ink-950
-            px-2.5 py-1 text-[10px] text-ink-300 sm:inline-flex"
-          title={t('app.privacyTooltip')}
-        >
-          <svg viewBox="0 0 16 16" className="h-3 w-3 text-crop-400" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M8 1.5l5 2v4c0 3-2.2 5.7-5 7-2.8-1.3-5-4-5-7v-4z" />
-            <path d="M5.8 8l1.6 1.6L10.4 6.5" strokeLinecap="round" />
-          </svg>
-          {t('app.privacy')}
-        </span>
+        <h1 className="shrink-0 text-sm font-semibold text-ink-100">{t('app.title')}</h1>
+        {/* One line saying what to do next, rather than a permanent reassurance that
+            is read once and then becomes furniture. The reassurance keeps its place
+            in the info dot beside it. */}
+        <p className="hidden min-w-0 items-center gap-1.5 truncate text-[11px] sm:flex">
+          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${status.tone}`} />
+          <span className="truncate text-ink-300">{status.text}</span>
+        </p>
+        <InfoDot label={t('app.privacy')} text={t('app.privacyTooltip')} />
 
         <div className="ml-auto flex items-center gap-1.5">
           {busy && <span className="text-[11px] text-ink-400">{t('app.reading')}</span>}
@@ -709,8 +801,11 @@ export default function App() {
             canRedo={history.canRedo}
             undoLabel={history.undoLabel}
             redoLabel={history.redoLabel}
+            pastLabels={history.pastLabels}
+            futureLabels={history.futureLabels}
             onUndo={history.undo}
             onRedo={history.redo}
+            onJump={history.jump}
           />
           <input
             ref={fileInputRef}
@@ -742,6 +837,7 @@ export default function App() {
               setSelection(new Set());
               setReviewed(new Set());
               setPinnedFields(new Set());
+              setExportAttempted(false);
               setTool('select');
               setFileName('');
               setFileNameEdited(false);
@@ -751,12 +847,39 @@ export default function App() {
           >
             {t('app.clear')}
           </button>
+          <button
+            type="button"
+            onClick={() => setShortcutsOpen(true)}
+            title={t('shortcuts.open')}
+            aria-label={t('shortcuts.open')}
+            className="grid h-7 w-7 place-items-center rounded-md border border-ink-700
+              bg-ink-800 text-ink-300 hover:bg-ink-700 hover:text-ink-100"
+          >
+            <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.6">
+              <path d="M5.8 5.8a2.2 2.2 0 113.1 2l-.9.7v1.1" strokeLinecap="round" />
+              <circle cx="8" cy="12.2" r="0.7" fill="currentColor" stroke="none" />
+            </svg>
+          </button>
           <LanguagePicker />
         </div>
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <aside className="w-[440px] shrink-0">
+        <SidePanel
+          collapsed={fieldsCollapsed}
+          width={fieldsWidth}
+          rail={
+            <CollapsedRail
+              side="left"
+              collapsed
+              onToggle={() => setFieldsCollapsed(false)}
+              hideLabel={t('panel.hideFields')}
+              showLabel={t('panel.showFields')}
+              title={t('fields.title')}
+              badge={workspace.fields.length}
+            />
+          }
+        >
           <LeftPanel
             workspace={workspace}
             selection={selection}
@@ -792,8 +915,23 @@ export default function App() {
             onMergeSelection={mergeSelection}
             onNewField={() => apply(t('action.addField'), createEmptyField)}
             onZoomToFeatures={zoomTo}
+            showBlocked={exportAttempted}
+            hoverFeatureIds={hoverFeatureIds}
+            onHoverFeatures={hoverFeatures}
+            onToggleCollapsed={() => setFieldsCollapsed(true)}
           />
-        </aside>
+        </SidePanel>
+        {!fieldsCollapsed && (
+          <PanelResizer
+            side="left"
+            width={fieldsWidth}
+            onWidthChange={setFieldsWidth}
+            onToggle={() => setFieldsCollapsed(true)}
+            minWidth={FIELDS_MIN}
+            maxWidth={maxFieldsWidth}
+            label={t('panel.resizeFields')}
+          />
+        )}
 
         <main className="flex min-w-0 flex-1 flex-col">
           <Toolbar
@@ -825,6 +963,9 @@ export default function App() {
               onCutHole={handleCutHole}
               onSplitLine={handleSplitLine}
               onGeometryEdited={handleGeometryEdited}
+              hoverFeatureIds={hoverFeatureIds}
+              onHoverFeatures={hoverFeatures}
+              labelFor={labelFor}
               onLocationError={(message) => toast(message, 'error')}
               onLocatingChange={setLocating}
               onOpenCoordinates={() => setCoordinatesOpen(true)}
@@ -873,7 +1014,33 @@ export default function App() {
           </div>
         </main>
 
-        <aside className="w-[330px] shrink-0">
+        {!checksCollapsed && (
+          <PanelResizer
+            side="right"
+            width={checksWidth}
+            onWidthChange={setChecksWidth}
+            onToggle={() => setChecksCollapsed(true)}
+            minWidth={CHECKS_MIN}
+            maxWidth={maxChecksWidth}
+            label={t('panel.resizeChecks')}
+          />
+        )}
+        <SidePanel
+          collapsed={checksCollapsed}
+          width={checksWidth}
+          rail={
+            <CollapsedRail
+              side="right"
+              collapsed
+              onToggle={() => setChecksCollapsed(false)}
+              hideLabel={t('panel.hideChecks')}
+              showLabel={t('panel.showChecks')}
+              title={t('qa.title')}
+              badge={blockingCount || flags.length}
+              badgeTone={blockingCount > 0 ? 'red' : flags.length > 0 ? 'amber' : 'grey'}
+            />
+          }
+        >
           <QAPanel
             flags={flags}
             activeFlagId={activeFlagId}
@@ -904,8 +1071,10 @@ export default function App() {
               })
             }
             onExport={openExport}
+            onHoverFlag={(flag) => hoverFeatures(flag ? flag.featureIds : [])}
+            onToggleCollapsed={() => setChecksCollapsed(true)}
           />
-        </aside>
+        </SidePanel>
       </div>
 
       {pendingImport && (
@@ -950,6 +1119,8 @@ export default function App() {
           onClose={() => setExportOpen(false)}
         />
       )}
+
+      {shortcutsOpen && <ShortcutSheet onClose={() => setShortcutsOpen(false)} />}
 
       <ToastStack
         toasts={toasts}

@@ -24,6 +24,9 @@ const SNAP_DISTANCE = 18;
 /** Deeper than this, upscaled tiles are too soft to trace against. */
 const MAX_ZOOM = 20;
 
+/** Field names appear from here in; further out they would overlap into a smear. */
+const LABEL_MIN_ZOOM = 14;
+
 export interface FocusRequest {
   bbox: BBox;
   /** Bumped on every request so repeating the same zoom still fires. */
@@ -124,6 +127,11 @@ export interface MapViewProps {
   /** Geometry shown as a dashed overlay while the smoothing slider is open. */
   preview: { featureId: FeatureId; geometry: PolyGeom }[] | null;
   focus: FocusRequest | null;
+  /** Boundaries to light up without selecting — a flag being pointed at, usually. */
+  hoverFeatureIds: ReadonlySet<FeatureId>;
+  onHoverFeatures: (ids: FeatureId[]) => void;
+  /** Names drawn on the map once it is zoomed in far enough for them to fit. */
+  labelFor: (feature: WFeature) => string;
   onSelect: (featureId: FeatureId | null, additive: boolean) => void;
   onDrawPolygon: (geometry: Polygon) => void;
   onCutHole: (geometry: Polygon) => void;
@@ -384,6 +392,9 @@ export default function MapView(props: MapViewProps) {
         geometry: feature.geometry,
       } as GeoJSON.Feature) as L.Polygon;
 
+      layer.on('mouseover', () => propsRef.current.onHoverFeatures([feature.id]));
+      layer.on('mouseout', () => propsRef.current.onHoverFeatures([]));
+
       layer.on('click', (event: L.LeafletMouseEvent) => {
         // While a draw mode is running the click is placing a vertex. Swallowing it here
         // would make it impossible to draw over an existing polygon, which is exactly what
@@ -501,6 +512,59 @@ export default function MapView(props: MapViewProps) {
     }
   }, [props.tool, props.snapping, props.selection, props.workspace]);
 
+  /* ------------------------------------------------------------- hover */
+
+  // Pointing is not selecting, so this only adds a class: no restyle, no state change,
+  // nothing that survives the pointer leaving.
+  useEffect(() => {
+    for (const [id, layer] of layersRef.current) {
+      const element = (layer as unknown as { _path?: SVGPathElement })._path;
+      element?.classList.toggle('feature-hover', props.hoverFeatureIds.has(id));
+    }
+  }, [props.hoverFeatureIds, props.workspace]);
+
+  /* ------------------------------------------------------------ labels */
+
+  // Field names on the map, but only once there is room for them: at a whole-farm zoom
+  // they would be a wall of overlapping text over the imagery being traced.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    // A layer carries one tooltip, so the two uses take turns: the name once there is
+    // room for it, and the area on hover the rest of the time.
+    const paint = () => {
+      const show = map.getZoom() >= LABEL_MIN_ZOOM;
+      for (const feature of propsRef.current.workspace.features) {
+        const layer = layersRef.current.get(feature.id);
+        if (!layer) continue;
+        const area = `${formatHa(areaHa(feature.geometry))} ha`;
+        const label = propsRef.current.labelFor(feature);
+        layer.unbindTooltip();
+        if (show && label !== '') {
+          layer.bindTooltip(`${label} · ${area}`, {
+            permanent: true,
+            direction: 'center',
+            className: 'field-label',
+            opacity: 1,
+          });
+        } else {
+          layer.bindTooltip(area, {
+            className: 'measure-tooltip',
+            sticky: true,
+            direction: 'top',
+          });
+        }
+      }
+    };
+
+    paint();
+    map.on('zoomend', paint);
+    return () => {
+      map.off('zoomend', paint);
+    };
+  }, [props.workspace, props.labelFor]);
+
   /* ------------------------------------------------- control wording */
 
   // The two icon controls are built once by Leaflet, so their wording is written in
@@ -606,10 +670,5 @@ function applyStyle(
     fillColor: color,
     fillOpacity: selected ? 0.4 : feature.fieldId ? 0.22 : 0.1,
     dashArray: feature.fieldId ? undefined : '6,4',
-  });
-  layer.bindTooltip(`${formatHa(areaHa(feature.geometry))} ha`, {
-    className: 'measure-tooltip',
-    sticky: true,
-    direction: 'top',
   });
 }

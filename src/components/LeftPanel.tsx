@@ -5,6 +5,7 @@ import type { StringKey } from '../i18n';
 import { areaHa, formatHa } from '../lib/geo';
 import { describeField, fieldGeometries, reviewKey } from '../lib/qa';
 import { UNGROUPED_COLOR, fieldColor } from '../lib/colors';
+import { PanelToggle } from './SidePanel';
 import { Button, InfoDot, PanelHeader } from './ui';
 
 /**
@@ -38,6 +39,15 @@ export interface LeftPanelProps {
   scopeFieldIds: ReadonlySet<FieldId>;
   /** Puts a field (and its polygons) in front of the quality panel. */
   onFocusField: (id: FieldId, additive: boolean) => void;
+  /**
+   * True once the user has tried to export and been stopped. Until then an empty
+   * attribute is just a box waiting to be filled in, not an error.
+   */
+  showBlocked: boolean;
+  /** Highlighted from elsewhere — a hovered flag, or a polygon under the cursor. */
+  hoverFeatureIds: ReadonlySet<FeatureId>;
+  onHoverFeatures: (ids: FeatureId[]) => void;
+  onToggleCollapsed: () => void;
   onSelectFeature: (id: FeatureId | null, additive: boolean) => void;
   onSelectMany: (ids: FeatureId[]) => void;
   onUpdateField: (id: FieldId, patch: Partial<Omit<WField, 'id'>>) => void;
@@ -146,6 +156,12 @@ export default function LeftPanel(props: LeftPanelProps) {
     [allUngrouped, terms, status],
   );
 
+  /** Fields with nothing blocking them, which is what "ready to export" means. */
+  const readyCount = useMemo(
+    () => allFields.filter((entry) => (blockingByField.get(entry.field.id) ?? 0) === 0).length,
+    [allFields, blockingByField],
+  );
+
   const hiddenFields = allFields.length - fields.length;
   const filtering = terms.length > 0 || status !== 'all';
   const searching = filtering;
@@ -192,7 +208,16 @@ export default function LeftPanel(props: LeftPanelProps) {
         <Button tone="ghost" onClick={props.onNewField} title={t('fields.newHint')}>
           {t('fields.new')}
         </Button>
+        <PanelToggle
+          side="left"
+          collapsed={false}
+          onToggle={props.onToggleCollapsed}
+          hideLabel={t('panel.hideFields')}
+          showLabel={t('panel.showFields')}
+        />
       </PanelHeader>
+
+      {allFields.length > 0 && <ReadyProgress ready={readyCount} total={allFields.length} />}
 
       <div className="shrink-0 border-b border-ink-800 px-2 py-1.5">
         <div className="relative">
@@ -306,15 +331,15 @@ export default function LeftPanel(props: LeftPanelProps) {
             {/* Fixed widths so a long farm name cannot squeeze the field name, which is
                 the column people actually read the table by. */}
             <colgroup>
+              {/* The three name columns are what people read the table by, so they get
+                  the room and the area figure moves into the expanded row. Wide enough
+                  for the badge and both icons side by side: the icons are transparent
+                  rather than absent until hover, so they hold their width. */}
               <col className="w-6" />
               <col className="w-7" />
               <col className="w-[20%]" />
               <col className="w-[18%]" />
               <col />
-              <col className="w-14" />
-              {/* Wide enough for the badge and both icons side by side: the icons are
-                  transparent rather than absent until hover, so they hold their width
-                  and a narrower column would push them over the area figure. */}
               <col className="w-16" />
             </colgroup>
             <thead className="sticky top-0 z-10 bg-ink-850">
@@ -352,9 +377,6 @@ export default function LeftPanel(props: LeftPanelProps) {
                 <th className="border-b border-ink-800 px-1 py-1.5 text-left font-semibold">
                   {t('fields.field')}
                 </th>
-                <th className="border-b border-ink-800 px-1.5 py-1.5 text-right font-semibold">
-                  {t('fields.ha')}
-                </th>
                 <th className="border-b border-ink-800 py-1.5" />
               </tr>
             </thead>
@@ -372,6 +394,9 @@ export default function LeftPanel(props: LeftPanelProps) {
                     memberSelected={memberSelected}
                     scoped={props.scopeFieldIds.has(entry.field.id)}
                     onFocus={(additive) => props.onFocusField(entry.field.id, additive)}
+                    showBlocked={props.showBlocked}
+                    hovered={entry.featureIds.some((id) => props.hoverFeatureIds.has(id))}
+                    onHover={props.onHoverFeatures}
                     blockingCount={blocking}
                     expanded={expanded.has(entry.field.id)}
                     checked={checked.has(entry.field.id)}
@@ -397,7 +422,7 @@ export default function LeftPanel(props: LeftPanelProps) {
             </tbody>
             <tfoot>
               <tr className="text-[11px] text-ink-400">
-                <td colSpan={5} className="border-t border-ink-800 px-2 py-1.5">
+                <td colSpan={4} className="border-t border-ink-800 px-2 py-1.5">
                   {searching
                     ? t('fields.shownOf', { shown: fields.length, total: allFields.length })
                     : t.n('fields.toExport', fields.length)}
@@ -405,7 +430,6 @@ export default function LeftPanel(props: LeftPanelProps) {
                 <td className="border-t border-ink-800 px-1.5 py-1.5 text-right tabular-nums text-ink-100">
                   {formatHa(totalHa)}
                 </td>
-                <td className="border-t border-ink-800" />
               </tr>
             </tfoot>
           </table>
@@ -476,6 +500,39 @@ export default function LeftPanel(props: LeftPanelProps) {
   );
 }
 
+/**
+ * How much of the job is done. A list of complaints is easier to work through when it
+ * also says how close the end is, and after a bulk fix this is the only thing on screen
+ * that shows the batch accomplished something.
+ */
+function ReadyProgress({ ready, total }: { ready: number; total: number }) {
+  const t = useT();
+  const share = total === 0 ? 0 : ready / total;
+  return (
+    <div className="shrink-0 border-b border-ink-800 px-3 py-1.5">
+      <div className="flex items-center gap-2">
+        <div
+          className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-ink-800"
+          role="progressbar"
+          aria-label={t('fields.progressLabel')}
+          aria-valuenow={ready}
+          aria-valuemin={0}
+          aria-valuemax={total}
+        >
+          <div
+            className={`h-full rounded-full transition-[width] duration-300
+              ${ready === total ? 'bg-crop-400' : 'bg-crop-500/70'}`}
+            style={{ width: `${share * 100}%` }}
+          />
+        </div>
+        <span className="shrink-0 text-[10px] tabular-nums text-ink-400">
+          {t('fields.progress', { ready, total })}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /* -------------------------------------------------------------------------- */
 /* Field row                                                                   */
 /* -------------------------------------------------------------------------- */
@@ -489,6 +546,10 @@ interface FieldRowProps {
   /** True while the quality panel is scoped to this field. */
   scoped: boolean;
   onFocus: (additive: boolean) => void;
+  /** Red attribute cells, once an export attempt has been stopped by them. */
+  showBlocked: boolean;
+  hovered: boolean;
+  onHover: (ids: FeatureId[]) => void;
   blockingCount: number;
   expanded: boolean;
   /** Ticked for bulk attribute editing. Independent of the polygon selection. */
@@ -515,8 +576,11 @@ function FieldRow(props: FieldRowProps) {
   return (
     <>
       <tr
+        onMouseEnter={() => props.onHover(props.memberIds)}
+        onMouseLeave={() => props.onHover([])}
         className={`group border-b border-ink-850 align-middle
           ${props.scoped ? 'scoped-row' : ''}
+          ${props.hovered ? 'ring-1 ring-inset ring-crop-400/60' : ''}
           ${props.memberSelected ? 'bg-ink-800' : 'hover:bg-ink-850'}`}
       >
         <td className="py-0.5 pl-1.5">
@@ -549,21 +613,23 @@ function FieldRow(props: FieldRowProps) {
           value={field.client}
           column="client"
           focus={props.focus}
+          showBlocked={props.showBlocked}
           onChange={(client) => props.onUpdate({ client })}
         />
         <AttributeCell
           value={field.farm}
           column="farm"
           focus={props.focus}
+          showBlocked={props.showBlocked}
           onChange={(farm) => props.onUpdate({ farm })}
         />
         <AttributeCell
           value={field.field}
           column="field"
           focus={props.focus}
+          showBlocked={props.showBlocked}
           onChange={(value) => props.onUpdate({ field: value })}
         />
-        <td className="px-1.5 text-right tabular-nums text-ink-300">{formatHa(props.areaHa)}</td>
         <td className="pr-1.5">
           <div className="flex items-center justify-end gap-0.5">
             {props.blockingCount > 0 && (
@@ -591,7 +657,10 @@ function FieldRow(props: FieldRowProps) {
 
       {props.expanded && (
         <tr className="border-b border-ink-850 bg-ink-950/40">
-          <td colSpan={7} className="px-2 py-1.5">
+          <td colSpan={6} className="px-2 py-1.5">
+            <p className="mb-1 px-1 text-[11px] tabular-nums text-ink-400">
+              {formatHa(props.areaHa)} {t('fields.ha')}
+            </p>
             <ul className="mb-1.5 space-y-0.5">
               {members.length === 0 && (
                 <li className="px-1 py-1 text-[11px] text-red-300">
@@ -635,11 +704,13 @@ function AttributeCell({
   value,
   column,
   focus,
+  showBlocked,
   onChange,
 }: {
   value: string;
   column: 'client' | 'farm' | 'field';
   focus: AttributeFocus | null;
+  showBlocked: boolean;
   onChange: (value: string) => void;
 }) {
   const t = useT();
@@ -658,6 +729,7 @@ function AttributeCell({
         ref={ref}
         className="field-input"
         data-empty={value.trim() === ''}
+        data-blocked={showBlocked && value.trim() === ''}
         value={value}
         maxLength={30}
         spellCheck={false}

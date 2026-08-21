@@ -64,7 +64,14 @@ test('shows the empty state before anything is loaded', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Prepare field boundaries for CropForce' })).toBeVisible();
   await expect(page.getByText('Drop your files')).toBeVisible();
-  await expect(page.getByText('Files are processed only in your browser')).toBeVisible();
+  // The privacy note moved into the header's info dot when the status line took its
+  // place, so it is one hover away rather than permanently on screen.
+  const privacy = page.getByRole('button', {
+    name: 'Files are processed only in your browser. Nothing is uploaded or stored.',
+  });
+  await expect(privacy).toBeVisible();
+  await privacy.hover();
+  await expect(page.getByRole('tooltip')).toContainText('No server, no database');
 });
 
 test('imports a KMZ, a UTM shapefile and a GeoJSON in one drop', async ({ page }) => {
@@ -1099,5 +1106,137 @@ test.describe('the two panels as one workflow', () => {
     await expect(page.getByText('Marked 2 warnings reviewed.')).toBeVisible();
     await expect(page.getByText('0 to review')).toBeVisible();
     await expect(page.getByRole('button', { name: '2 reviewed' })).toBeVisible();
+  });
+});
+
+
+test.describe('working room', () => {
+  async function loaded(page: Page) {
+    await page.setInputFiles('input[type=file]', FILES);
+    await page.getByRole('button', { name: 'Add to workspace' }).click();
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(4);
+  }
+
+  const mapWidth = (page: Page) =>
+    page.locator('.leaflet-container').evaluate((node) => node.getBoundingClientRect().width);
+
+  test('folds a panel away and brings it back', async ({ page }) => {
+    await page.goto('/');
+    await loaded(page);
+    const before = await mapWidth(page);
+
+    await page.getByRole('button', { name: 'Hide the quality panel' }).click();
+    await expect(page.locator('article')).toHaveCount(0);
+    expect(await mapWidth(page)).toBeGreaterThan(before);
+
+    // The folded rail still says what it is, and how bad things are.
+    const rail = page.getByRole('button', { name: 'Show the quality panel' });
+    await expect(rail).toBeVisible();
+    await rail.click();
+    await expect(page.locator('article')).toHaveCount(3);
+  });
+
+  test('resizes a panel from the keyboard', async ({ page }) => {
+    await page.goto('/');
+    await loaded(page);
+    const before = await mapWidth(page);
+
+    const splitter = page.getByRole('separator', { name: /field list/ });
+    await splitter.focus();
+    for (let n = 0; n < 4; n++) await page.keyboard.press('ArrowLeft');
+
+    expect(await mapWidth(page)).toBeGreaterThan(before);
+  });
+
+  test('opens the shortcut sheet with ?', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: 'Prepare field boundaries for CropForce' })).toBeVisible();
+    await page.keyboard.press('?');
+
+    const sheet = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByText('Cut hole')).toBeVisible();
+    await expect(sheet.getByText('Show this list')).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(sheet).toBeHidden();
+  });
+});
+
+test.describe('saying it once', () => {
+  test('leaves empty attributes alone until an export is actually stopped', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('input[type=file]', FILES);
+    await page.getByRole('button', { name: 'Add to workspace' }).click();
+
+    const empty = page.locator('input[aria-label="Client"][data-empty="true"]').first();
+    await expect(empty).toHaveAttribute('data-blocked', 'false');
+
+    await page.getByRole('button', { name: 'Export merged shapefile for CropForce' }).click();
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
+
+    await expect(empty).toHaveAttribute('data-blocked', 'true');
+  });
+
+  test('counts how much of the job is done', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('input[type=file]', FILES);
+    await page.getByRole('button', { name: 'Add to workspace' }).click();
+
+    const bar = page.getByRole('progressbar', { name: 'Fields ready to export' });
+    await expect(bar).toHaveAttribute('aria-valuenow', '1');
+    await expect(bar).toHaveAttribute('aria-valuemax', '4');
+    await expect(page.getByText('1 of 4 ready')).toBeVisible();
+
+    // The header says the one thing that matters next, not every count at once.
+    await expect(page.getByText('3 fields need attention before they can be exported')).toBeVisible();
+  });
+
+  test('lights the boundary a flag is about, without selecting it', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('input[type=file]', FILES);
+    await page.getByRole('button', { name: 'Add to workspace' }).click();
+
+    const hovered = page.locator('.leaflet-interactive.feature-hover');
+    await expect(hovered).toHaveCount(0);
+
+    await page.locator('article').first().hover();
+    await expect(hovered).toHaveCount(1);
+    // Pointing is not selecting.
+    await expect(page.getByText('Nothing selected')).toBeVisible();
+
+    await page.getByRole('heading', { name: 'Quality checks' }).hover();
+    await expect(hovered).toHaveCount(0);
+  });
+
+  test('names the fields on the map once there is room for them', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('input[type=file]', FILES);
+    await page.getByRole('button', { name: 'Add to workspace' }).click();
+
+    await expect(page.locator('.field-label')).toHaveCount(0);
+
+    await page.locator('tbody tr').first().hover();
+    await page.getByRole('button', { name: 'Zoom to field' }).first().click();
+
+    await expect(page.locator('.field-label').first()).toContainText('Manor / Church Field');
+  });
+
+  test('jumps back several steps from the history list', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('input[type=file]', FILES);
+    await page.getByRole('button', { name: 'Add to workspace' }).click();
+    await attributeCell(page, 'client').nth(1).fill('Acme');
+    await attributeCell(page, 'farm').nth(1).fill('Home');
+
+    await page.getByRole('button', { name: 'Recent actions' }).first().click();
+    // Newest first under "Now", so the second "Edit attributes" is the earlier of the
+    // two edits. Undoing back to it takes both out in one go.
+    await page.getByRole('button', { name: 'Edit attributes' }).nth(1).click();
+
+    await expect(attributeCell(page, 'client').nth(1)).toHaveValue('');
+    await expect(attributeCell(page, 'farm').nth(1)).toHaveValue('');
+    // The import itself survives, because it sits below the entry that was clicked.
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(4);
   });
 });

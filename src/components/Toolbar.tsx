@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { Basemap, Tool } from '../types';
 import { useT } from '../i18n';
@@ -257,21 +258,51 @@ export function HistoryButtons({
   canRedo,
   undoLabel,
   redoLabel,
+  pastLabels,
+  futureLabels,
   onUndo,
   onRedo,
+  onJump,
 }: {
   canUndo: boolean;
   canRedo: boolean;
   undoLabel: string | null;
   redoLabel: string | null;
+  pastLabels: readonly string[];
+  futureLabels: readonly string[];
   onUndo: () => void;
   onRedo: () => void;
+  onJump: (delta: number) => void;
 }) {
   const t = useT();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
   const undoTitle = undoLabel ? t('app.undo', { label: undoLabel }) : t('app.undoEmpty');
   const redoTitle = redoLabel ? t('app.redo', { label: redoLabel }) : t('app.redoEmpty');
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (event: MouseEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const jump = (delta: number) => {
+    onJump(delta);
+    setOpen(false);
+  };
+
   return (
-    <div className="flex items-center gap-1">
+    <div ref={ref} className="relative flex items-center gap-1">
       <Button onClick={onUndo} disabled={!canUndo} title={undoTitle} className="px-2">
         <HistoryArrow />
         <span className="sr-only">{t('history.undo')}</span>
@@ -280,7 +311,91 @@ export function HistoryButtons({
         <HistoryArrow forward />
         <span className="sr-only">{t('history.redo')}</span>
       </Button>
+      <Button
+        onClick={() => setOpen((value) => !value)}
+        disabled={!canUndo && !canRedo}
+        title={t('history.open')}
+        className="px-1.5"
+      >
+        <svg viewBox="0 0 16 16" className="h-3 w-3" fill="currentColor" aria-hidden="true">
+          <path d="M4 6l4 4 4-4z" />
+        </svg>
+        <span className="sr-only">{t('history.open')}</span>
+      </Button>
+
+      {open && (
+        <div
+          className="absolute right-0 top-9 z-2000 w-64 overflow-hidden rounded-md border
+            border-ink-600 bg-ink-900 py-1 shadow-2xl"
+        >
+          <h3 className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-ink-400">
+            {t('history.title')}
+          </h3>
+          <ol className="max-h-72 overflow-y-auto">
+            {/* Redoable entries sit above "Now", newest of them furthest from it, so the
+                list reads top-to-bottom as forwards-to-backwards in time. */}
+            {futureLabels
+              .map((label, index) => ({ label, delta: index + 1 }))
+              .reverse()
+              .map(({ label, delta }) => (
+                <HistoryEntry
+                  key={`future-${delta}`}
+                  label={label}
+                  title={t('history.jumpForward')}
+                  tone="future"
+                  onClick={() => jump(delta)}
+                />
+              ))}
+            <li
+              className="flex items-center gap-2 border-y border-ink-800 bg-ink-850 px-3 py-1
+                text-[10px] font-semibold uppercase tracking-wider text-crop-300"
+            >
+              {t('history.now')}
+            </li>
+            {pastLabels.length === 0 && futureLabels.length === 0 && (
+              <li className="px-3 py-2 text-[11px] text-ink-400">{t('history.empty')}</li>
+            )}
+            {[...pastLabels]
+              .reverse()
+              .map((label, index) => (
+                <HistoryEntry
+                  key={`past-${index}`}
+                  label={label}
+                  title={t('history.jumpBack')}
+                  tone="past"
+                  onClick={() => jump(-(index + 1))}
+                />
+              ))}
+          </ol>
+        </div>
+      )}
     </div>
+  );
+}
+
+function HistoryEntry({
+  label,
+  title,
+  tone,
+  onClick,
+}: {
+  label: string;
+  title: string;
+  tone: 'past' | 'future';
+  onClick: () => void;
+}) {
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onClick}
+        title={title}
+        className={`block w-full truncate px-3 py-1.5 text-left text-[11px] hover:bg-ink-800
+          ${tone === 'future' ? 'text-ink-400 italic' : 'text-ink-200'}`}
+      >
+        {label}
+      </button>
+    </li>
   );
 }
 
