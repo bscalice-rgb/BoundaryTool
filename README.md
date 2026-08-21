@@ -75,15 +75,24 @@ call anything.
 3. **Name in bulk where it helps.** Search the list by client, farm, field or source
    file, tick what you find, and set one Client or Farm name across all of it at once.
    Field names stay per-row, because each one names a different field.
-4. **Work from the report.** The counts in the quality panel are buttons: click
-   "2 blocking" to select every polygon behind those flags and frame them on the map,
-   or click a single flag's title to go straight to that one. The field list has a
-   matching filter row — All, Any issue, Blocking, To review, Clean — so a long list can
-   be cut down to the rows that still need work.
+4. **Work from the report.** The two panels are one workflow rather than two lists
+   side by side. The counts in the quality panel are buttons: click "2 blocking" to
+   select every polygon behind those flags and frame them on the map, or click a single
+   flag's title to go straight to that one. Going the other way, picking a field in the
+   list — its red badge, or its "select polygons" button — narrows the quality panel to
+   that field's issues, and says so with a banner you can clear. The filter row above
+   the table uses the same three words as the panel opposite it: **Blocking** and
+   **To review** name the same sets of fields as the two counts there.
 5. **Clean and fix.** The quality panel checks each field and offers two routes for
    every flag: an automatic correction, or a manual one that selects the offending
    geometry and arms the right editing tool. Everything, auto-fixes included, is one
-   Ctrl+Z away from being undone. A warning you have looked at and are happy with can be
+   Ctrl+Z away from being undone. Chips across the top filter the panel by the kind of
+   problem, so forty slivers can be dealt with as one job rather than in amongst
+   everything else — tick them (or tick the section header to take the lot) and
+   **Auto-fix** or **Mark reviewed** applies to the whole batch. A bulk fix is a single
+   history entry, so one Ctrl+Z puts all of it back. Overlaps are the one thing a batch
+   will not touch: which field keeps the shared area is a decision, and the run says how
+   many it left for you. A warning you have looked at and are happy with can be
    marked reviewed: it drops out of the working list into a collapsed "reviewed" section,
    stops counting against the "To review" filter, and can be put back with **Un-review**.
    Reviewing is a note about what you have read rather than a change to the boundaries,

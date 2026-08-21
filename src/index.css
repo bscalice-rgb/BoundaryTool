@@ -179,3 +179,16 @@ input[type='range'] {
 .flag-active {
   animation: flag-pulse 1.2s ease-in-out 2;
 }
+
+/*
+ * A field the quality panel is currently scoped to. Cell backgrounds are used rather
+ * than the row's, because a td paints over the tr underneath it and the row is already
+ * using its own background to say whether its polygons are selected.
+ */
+.scoped-row > td {
+  background-color: color-mix(in srgb, var(--color-crop-500) 12%, transparent);
+}
+
+.scoped-row > td:first-child {
+  box-shadow: inset 3px 0 0 var(--color-crop-400);
+}

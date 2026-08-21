@@ -989,3 +989,115 @@ test.describe('language', () => {
     await expect(page.getByRole('columnheader', { name: 'Field' })).toBeVisible();
   });
 });
+
+
+test.describe('the two panels as one workflow', () => {
+  /** Imports with the guessed mapping: three fields blocked, one clean. */
+  async function importAsFields(page: Page) {
+    await page.setInputFiles('input[type=file]', FILES);
+    await page.getByRole('button', { name: 'Add to workspace' }).click();
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(4);
+  }
+
+  /** Types a value the input's own maxlength would refuse, the way imported data does. */
+  async function forceValue(page: Page, column: 'client' | 'farm' | 'field', row: number, value: string) {
+    await attributeCell(page, column).nth(row).evaluate((node, text) => {
+      const input = node as HTMLInputElement;
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value',
+      )!.set!;
+      setter.call(input, text);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }, value);
+  }
+
+  test('shows a single field\'s issues when it is picked from the list', async ({ page }) => {
+    await page.goto('/');
+    await importAsFields(page);
+    await expect(page.locator('article')).toHaveCount(3);
+
+    // The blocking badge on a row is the way into that field's issues.
+    await page.getByRole('button', { name: /^Show the issues on/ }).first().click();
+
+    await expect(page.getByText(/Showing 1 selected field/)).toBeVisible();
+    await expect(page.locator('article')).toHaveCount(1);
+
+    await page.getByRole('button', { name: 'Show all fields' }).click();
+    await expect(page.getByText(/Showing 1 selected field/)).toBeHidden();
+    await expect(page.locator('article')).toHaveCount(3);
+  });
+
+  test('says so when the field you picked has nothing wrong with it', async ({ page }) => {
+    await page.goto('/');
+    await importAsFields(page);
+
+    // Church Field arrives fully named, so it carries no flag at all.
+    await page.locator('tbody tr').first().hover();
+    await page.getByRole('button', { name: "Select this field's polygons" }).first().click();
+
+    await expect(page.getByText('Nothing is flagged on the fields you have selected.')).toBeVisible();
+  });
+
+  test('filters the quality panel by problem category', async ({ page }) => {
+    await page.goto('/');
+    await importAsFields(page);
+    // A second kind of problem, so there is something to tell apart.
+    await attributeCell(page, 'field').first().fill('Wheat 2024');
+
+    const seasonNames = page.getByRole('button', { name: /^Season names/ });
+    await expect(seasonNames).toBeVisible();
+    await expect(page.locator('article')).toHaveCount(4);
+
+    await seasonNames.click();
+    await expect(page.locator('article')).toHaveCount(1);
+    await expect(page.locator('article')).toContainText('season-specific');
+
+    await page.getByRole('button', { name: /^Missing names/ }).click();
+    await expect(page.locator('article')).toHaveCount(3);
+  });
+
+  test('auto-fixes a batch as one undoable step', async ({ page }) => {
+    await page.goto('/');
+    await importAsFields(page);
+    await forceValue(page, 'field', 1, 'North Field Behind The Old Barn At Manor Farm');
+    await forceValue(page, 'field', 3, 'South Field Behind The New Barn At Manor Farm');
+
+    await page.getByRole('button', { name: /^Names too long/ }).click();
+    await expect(page.locator('article')).toHaveCount(2);
+
+    await page.getByRole('checkbox', { name: 'Select every issue shown' }).check();
+    await expect(page.getByText('2 issues selected')).toBeVisible();
+    await page.getByRole('button', { name: 'Auto-fix 2' }).click();
+
+    await expect(page.getByText('Fixed 2 issues')).toBeVisible();
+    await expect(attributeCell(page, 'field').nth(1)).toHaveValue('North Field Behind The Old');
+    await expect(attributeCell(page, 'field').nth(3)).toHaveValue('South Field Behind The New');
+
+    // One entry in the history, so one undo puts both back.
+    await page.keyboard.press('Control+z');
+    await expect(attributeCell(page, 'field').nth(1)).toHaveValue(
+      'North Field Behind The Old Barn At Manor Farm',
+    );
+    await expect(attributeCell(page, 'field').nth(3)).toHaveValue(
+      'South Field Behind The New Barn At Manor Farm',
+    );
+  });
+
+  test('marks several warnings reviewed at once', async ({ page }) => {
+    await page.goto('/');
+    await importAsFields(page);
+    await attributeCell(page, 'field').nth(0).fill('Wheat 2024');
+    await attributeCell(page, 'field').nth(1).fill('Barley 2023');
+
+    await page.getByRole('button', { name: /^Season names/ }).click();
+    await expect(page.locator('article')).toHaveCount(2);
+
+    await page.getByRole('checkbox', { name: 'Select every issue shown' }).check();
+    await page.getByRole('button', { name: 'Mark 2 reviewed' }).click();
+
+    await expect(page.getByText('Marked 2 warnings reviewed.')).toBeVisible();
+    await expect(page.getByText('0 to review')).toBeVisible();
+    await expect(page.getByRole('button', { name: '2 reviewed' })).toBeVisible();
+  });
+});

@@ -9,6 +9,7 @@ import type {
   Tool,
   WFeature,
   WField,
+  Workspace,
 } from './types';
 import { useT } from './i18n';
 import LanguagePicker from './components/LanguagePicker';
@@ -102,6 +103,12 @@ export default function App() {
    * purpose: this is a note about what has been read, not a change to the boundaries.
    */
   const [reviewed, setReviewed] = useState<ReadonlySet<string>>(new Set());
+  /**
+   * Fields put in front of the quality panel from the list, on top of whatever the
+   * polygon selection already implies. Kept separately so a field with no polygons —
+   * which cannot be selected on the map — can still be worked on.
+   */
+  const [pinnedFields, setPinnedFields] = useState<ReadonlySet<FieldId>>(new Set());
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nonceRef = useRef(0);
@@ -143,6 +150,7 @@ export default function App() {
     [selectedFeatures],
   );
 
+
   /* --------------------------------------------------------------- helpers */
 
   const zoomTo = useCallback(
@@ -179,6 +187,38 @@ export default function App() {
   }, []);
 
   const selectMany = useCallback((ids: FeatureId[]) => setSelection(new Set(ids)), []);
+
+  /**
+   * What the quality panel is scoped to. Selecting a field's polygons — from the list,
+   * from the map, or from a flag — is what "I am working on this" means everywhere else
+   * in the app, so the panel follows it rather than inventing a second kind of selection.
+   */
+  const scopeFieldIds = useMemo(() => {
+    const ids = new Set<FieldId>(pinnedFields);
+    for (const feature of selectedFeatures) {
+      if (feature.fieldId) ids.add(feature.fieldId);
+    }
+    return ids;
+  }, [selectedFeatures, pinnedFields]);
+
+  const clearScope = useCallback(() => {
+    setPinnedFields(new Set());
+    setSelection(new Set());
+  }, []);
+
+  /** Puts one field in front of the quality panel, and its polygons on the map with it. */
+  const focusField = useCallback(
+    (id: FieldId, additive: boolean) => {
+      const members = workspace.features.filter((f) => f.fieldId === id).map((f) => f.id);
+      setPinnedFields((current) => (additive ? new Set(current).add(id) : new Set([id])));
+      setSelection((current) =>
+        additive ? new Set([...current, ...members]) : new Set(members),
+      );
+      if (members.length > 0) zoomTo(members);
+      setActiveFlagId(null);
+    },
+    [workspace.features, zoomTo],
+  );
 
   /* ---------------------------------------------------------------- import */
 
@@ -347,6 +387,31 @@ export default function App() {
 
   /* -------------------------------------------------------------- QA fixes */
 
+  /**
+   * Runs one flag's programmatic correction against a given workspace. Overlaps are the
+   * exception: which field keeps the shared area is a judgement the tool will not make,
+   * so those return null and are dealt with through the dialog instead.
+   */
+  const applyAutoFix = useCallback(
+    (current: Workspace, flag: QAFlag) => {
+      const spec = flag.autoFix;
+      if (!spec || spec.kind === 'resolve-overlap') return null;
+      switch (spec.kind) {
+        case 'unkink':
+          return autoFixGeometry(current, flag.featureIds, t);
+        case 'delete-features':
+          return autoDeleteFeatures(current, flag.featureIds, t);
+        case 'uniquify-names':
+          return autoUniquifyNames(current, flag.fieldIds, t);
+        case 'shorten-names':
+          return autoShortenNames(current, flag.fieldIds, t);
+        default:
+          return autoSimplify(current, flag.featureIds, spec.toleranceMeters, t);
+      }
+    },
+    [t],
+  );
+
   const handleAutoFix = useCallback(
     (flag: QAFlag) => {
       setActiveFlagId(flag.id);
@@ -362,25 +427,50 @@ export default function App() {
         return;
       }
 
-      const outcome =
-        spec.kind === 'unkink'
-          ? autoFixGeometry(workspace, flag.featureIds, t)
-          : spec.kind === 'delete-features'
-            ? autoDeleteFeatures(workspace, flag.featureIds, t)
-            : spec.kind === 'uniquify-names'
-              ? autoUniquifyNames(workspace, flag.fieldIds, t)
-              : spec.kind === 'shorten-names'
-                ? autoShortenNames(workspace, flag.fieldIds, t)
-                : autoSimplify(workspace, flag.featureIds, spec.toleranceMeters, t);
-
-      if (!outcome.ok) {
-        toast(outcome.message, 'error');
+      const outcome = applyAutoFix(workspace, flag);
+      if (!outcome || !outcome.ok) {
+        if (outcome) toast(outcome.message, 'error');
         return;
       }
       apply(t('action.autoFix', { title: flag.title }), () => outcome.workspace);
       toast(t('toast.undoHint', { message: outcome.message }));
     },
-    [apply, workspace, toast, t],
+    [apply, applyAutoFix, workspace, toast, t],
+  );
+
+  /**
+   * Fixes a batch in one go, as a single history entry: a run of forty slivers is a
+   * chore, not forty decisions, and one Ctrl+Z should put it all back.
+   */
+  const handleAutoFixMany = useCallback(
+    (flags: QAFlag[]) => {
+      let next = workspace;
+      let fixed = 0;
+      let overlaps = 0;
+      for (const flag of flags) {
+        if (flag.autoFix?.kind === 'resolve-overlap') {
+          overlaps += 1;
+          continue;
+        }
+        // Each fix runs against the result of the last, so flags that overlap in the
+        // features they touch settle in order instead of fighting each other.
+        const outcome = applyAutoFix(next, flag);
+        if (outcome?.ok) {
+          next = outcome.workspace;
+          fixed += 1;
+        }
+      }
+
+      const skipped = overlaps > 0 ? t.n('toast.bulkSkipped', overlaps) : '';
+      if (fixed === 0) {
+        toast(overlaps > 0 ? skipped.trim() : t('toast.bulkNothingFixed'), 'error');
+        return;
+      }
+      setActiveFlagId(null);
+      apply(t('action.autoFixMany', { count: fixed }), () => next);
+      toast(t('toast.undoHint', { message: t.n('toast.bulkFixed', fixed) }) + skipped);
+    },
+    [apply, applyAutoFix, workspace, toast, t],
   );
 
   /** Selects every polygon behind the given flags and frames them on the map. */
@@ -555,6 +645,7 @@ export default function App() {
       if (event.key === 'Escape') {
         setTool('select');
         setSelection(new Set());
+        setPinnedFields(new Set());
         return;
       }
       if (event.key === 'Delete' || event.key === 'Backspace') {
@@ -650,6 +741,7 @@ export default function App() {
               history.clear();
               setSelection(new Set());
               setReviewed(new Set());
+              setPinnedFields(new Set());
               setTool('select');
               setFileName('');
               setFileNameEdited(false);
@@ -671,6 +763,8 @@ export default function App() {
             flags={flags}
             attributeFocus={attributeFocus}
             reviewed={reviewed}
+            scopeFieldIds={scopeFieldIds}
+            onFocusField={focusField}
             onSelectFeature={selectOne}
             onSelectMany={selectMany}
             onUpdateField={(id, patch) =>
@@ -788,9 +882,20 @@ export default function App() {
             onFixManually={handleFixManually}
             onSelectFlagged={handleSelectFlagged}
             reviewed={reviewed}
+            scopeFieldIds={scopeFieldIds}
+            onClearScope={clearScope}
+            onAutoFixMany={handleAutoFixMany}
             onReview={(flag) =>
               setReviewed((current) => new Set(current).add(reviewKey(flag)))
             }
+            onReviewMany={(flags) => {
+              setReviewed((current) => {
+                const next = new Set(current);
+                for (const flag of flags) next.add(reviewKey(flag));
+                return next;
+              });
+              toast(t.n('toast.bulkReviewed', flags.length));
+            }}
             onUnreview={(flag) =>
               setReviewed((current) => {
                 const next = new Set(current);

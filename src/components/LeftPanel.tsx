@@ -7,12 +7,15 @@ import { describeField, fieldGeometries, reviewKey } from '../lib/qa';
 import { UNGROUPED_COLOR, fieldColor } from '../lib/colors';
 import { Button, InfoDot, PanelHeader } from './ui';
 
-/** Which fields the list shows, by the state of their quality flags. */
-export type StatusFilter = 'all' | 'issues' | 'blocking' | 'review' | 'clean';
+/**
+ * Which fields the list shows, by the state of their quality flags. The names match
+ * the two counts in the quality panel on purpose: "Blocking" here and "N blocking"
+ * there are the same set of fields, so the two panels can be read against each other.
+ */
+export type StatusFilter = 'all' | 'blocking' | 'review' | 'clean';
 
 const STATUS_FILTERS: { id: StatusFilter; label: StringKey; hint: StringKey }[] = [
   { id: 'all', label: 'filter.all', hint: 'filter.allHint' },
-  { id: 'issues', label: 'filter.issues', hint: 'filter.issuesHint' },
   { id: 'blocking', label: 'filter.blocking', hint: 'filter.blockingHint' },
   { id: 'review', label: 'filter.review', hint: 'filter.reviewHint' },
   { id: 'clean', label: 'filter.clean', hint: 'filter.cleanHint' },
@@ -31,6 +34,10 @@ export interface LeftPanelProps {
   attributeFocus: AttributeFocus | null;
   /** Warnings already waved through, so they stop counting as "needs review". */
   reviewed: ReadonlySet<string>;
+  /** Fields the quality panel is currently scoped to; highlighted here to match. */
+  scopeFieldIds: ReadonlySet<FieldId>;
+  /** Puts a field (and its polygons) in front of the quality panel. */
+  onFocusField: (id: FieldId, additive: boolean) => void;
   onSelectFeature: (id: FeatureId | null, additive: boolean) => void;
   onSelectMany: (ids: FeatureId[]) => void;
   onUpdateField: (id: FieldId, patch: Partial<Omit<WField, 'id'>>) => void;
@@ -101,8 +108,6 @@ export default function LeftPanel(props: LeftPanelProps) {
         return entry.blocking > 0;
       case 'review':
         return entry.review > 0;
-      case 'issues':
-        return entry.blocking > 0 || entry.review > 0;
       default:
         return entry.blocking === 0 && entry.review === 0;
     }
@@ -247,7 +252,6 @@ export default function LeftPanel(props: LeftPanelProps) {
                     const entry_ = statusByField.get(entry.field.id) ?? { blocking: 0, review: 0 };
                     if (option.id === 'blocking') return entry_.blocking > 0;
                     if (option.id === 'review') return entry_.review > 0;
-                    if (option.id === 'issues') return entry_.blocking > 0 || entry_.review > 0;
                     return entry_.blocking === 0 && entry_.review === 0;
                   }).length;
             return (
@@ -304,11 +308,14 @@ export default function LeftPanel(props: LeftPanelProps) {
             <colgroup>
               <col className="w-6" />
               <col className="w-7" />
-              <col className="w-[21%]" />
-              <col className="w-[19%]" />
+              <col className="w-[20%]" />
+              <col className="w-[18%]" />
               <col />
               <col className="w-14" />
-              <col className="w-14" />
+              {/* Wide enough for the badge and both icons side by side: the icons are
+                  transparent rather than absent until hover, so they hold their width
+                  and a narrower column would push them over the area figure. */}
+              <col className="w-16" />
             </colgroup>
             <thead className="sticky top-0 z-10 bg-ink-850">
               <tr className="text-[10px] uppercase tracking-wide text-ink-400">
@@ -363,6 +370,8 @@ export default function LeftPanel(props: LeftPanelProps) {
                     areaHa={entry.areaHa}
                     memberIds={entry.featureIds}
                     memberSelected={memberSelected}
+                    scoped={props.scopeFieldIds.has(entry.field.id)}
+                    onFocus={(additive) => props.onFocusField(entry.field.id, additive)}
                     blockingCount={blocking}
                     expanded={expanded.has(entry.field.id)}
                     checked={checked.has(entry.field.id)}
@@ -477,6 +486,9 @@ interface FieldRowProps {
   areaHa: number;
   memberIds: FeatureId[];
   memberSelected: boolean;
+  /** True while the quality panel is scoped to this field. */
+  scoped: boolean;
+  onFocus: (additive: boolean) => void;
   blockingCount: number;
   expanded: boolean;
   /** Ticked for bulk attribute editing. Independent of the polygon selection. */
@@ -504,6 +516,7 @@ function FieldRow(props: FieldRowProps) {
     <>
       <tr
         className={`group border-b border-ink-850 align-middle
+          ${props.scoped ? 'scoped-row' : ''}
           ${props.memberSelected ? 'bg-ink-800' : 'hover:bg-ink-850'}`}
       >
         <td className="py-0.5 pl-1.5">
@@ -554,13 +567,16 @@ function FieldRow(props: FieldRowProps) {
         <td className="pr-1.5">
           <div className="flex items-center justify-end gap-0.5">
             {props.blockingCount > 0 && (
-              <span
+              <button
+                type="button"
+                onClick={(event) => props.onFocus(event.shiftKey)}
                 title={t.n('fields.blockingBadge', props.blockingCount)}
+                aria-label={t('fields.showIssues', { name: describeField(field, t) })}
                 className="mr-0.5 grid h-4 w-4 place-items-center rounded-full bg-red-500/20
-                  text-[9px] font-bold text-red-300"
+                  text-[9px] font-bold text-red-300 hover:bg-red-500/40 hover:text-red-100"
               >
                 {props.blockingCount}
-              </span>
+              </button>
             )}
             <IconButton title={t('fields.selectMembers')} onClick={props.onSelectMembers}>
               <path d="M2 2h4M2 2v4M14 2h-4M14 2v4M2 14h4M2 14v-4M14 14h-4M14 14v-4" />
