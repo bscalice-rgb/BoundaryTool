@@ -226,14 +226,10 @@ test('runs a QA auto-fix and undoes it', async ({ page }) => {
   await expect(page.locator('article', { hasText: 'season-specific' })).toBeVisible();
 });
 
-test('draws a polygon and undoes it with the keyboard', async ({ page }) => {
-  await page.goto('/');
-  await importFixtures(page);
-
-  await page.getByRole('button', { name: /^Draw/ }).click();
+/** Draws a rectangle around the middle of the map and closes it. */
+async function drawRectangle(page: Page) {
   const map = page.locator('.leaflet-container');
   const box = (await map.boundingBox())!;
-
   const click = (dx: number, dy: number) =>
     page.mouse.click(box.x + box.width / 2 + dx, box.y + box.height / 2 + dy);
 
@@ -241,14 +237,26 @@ test('draws a polygon and undoes it with the keyboard', async ({ page }) => {
   await click(60, -80);
   await click(60, 60);
   await page.mouse.dblclick(box.x + box.width / 2 - 120, box.y + box.height / 2 + 60);
+}
 
-  await expect(page.locator('text=/5 polygons? not assigned/')).toBeVisible();
+test('draws a polygon and undoes it with the keyboard', async ({ page }) => {
+  await page.goto('/');
+  await importFixtures(page);
 
-  await page.keyboard.press('Control+z');
+  await page.getByRole('button', { name: 'Draw', exact: true }).click();
+  await drawRectangle(page);
+
+  // The polygon lands in a field of its own rather than on the ungrouped pile, and
+  // the four imported ones are left where they were.
+  await expect(page.locator('input[aria-label="Field"]')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Show all fields' }).click();
   await expect(page.locator('text=/4 polygons? not assigned/')).toBeVisible();
 
+  await page.keyboard.press('Control+z');
+  await expect(page.locator('input[aria-label="Field"]')).toHaveCount(0);
+
   await page.keyboard.press('Control+Shift+z');
-  await expect(page.locator('text=/5 polygons? not assigned/')).toBeVisible();
+  await expect(page.locator('input[aria-label="Field"]')).toHaveCount(1);
 });
 
 /**
@@ -327,8 +335,10 @@ test('resolves an overlap between two fields and undoes the clip', async ({ page
   await attributeCell(page, 'farm').first().fill('Home');
   await attributeCell(page, 'field').first().fill('West');
 
-  // Draw a second polygon overlapping it, and make that a field too.
-  await page.getByRole('button', { name: /^Draw/ }).click();
+  // Draw a second polygon overlapping it. Drawing makes it a field on its own, so
+  // the picker has to be sent away from the field currently being worked on.
+  await page.getByRole('button', { name: 'Draw', exact: true }).click();
+  await page.getByLabel('Draws into').selectOption('new');
   const cx = box.x + box.width / 2;
   const cy = box.y + box.height / 2;
   await page.mouse.click(cx, cy - 80);
@@ -336,11 +346,10 @@ test('resolves an overlap between two fields and undoes the clip', async ({ page
   await page.mouse.click(cx + 200, cy + 80);
   await page.mouse.dblclick(cx, cy + 80);
 
-  await page.getByRole('button', { name: 'Select all', exact: true }).click();
-  await page.getByRole('button', { name: 'Combine into one field' }).click();
+  await page.keyboard.type('East');
   await attributeCell(page, 'client').nth(1).fill('Acme');
   await attributeCell(page, 'farm').nth(1).fill('Home');
-  await attributeCell(page, 'field').nth(1).fill('East');
+  await page.getByRole('button', { name: 'Show all fields' }).click();
 
   const overlapFlag = page.locator('article', { hasText: 'overlaps' });
   await expect(overlapFlag).toBeVisible();
@@ -1238,5 +1247,88 @@ test.describe('saying it once', () => {
     await expect(attributeCell(page, 'farm').nth(1)).toHaveValue('');
     // The import itself survives, because it sits below the entry that was clicked.
     await expect(page.locator('input[aria-label="Field"]')).toHaveCount(4);
+  });
+});
+
+
+/**
+ * Drawing a boundary and creating a field used to be two jobs with a manual join in
+ * between. These cover the join.
+ */
+test.describe('drawing a field', () => {
+  test('turns a drawn boundary into a field, ready to name', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Draw field' }).click();
+
+    // The welcome panel covers the map, so it has to move out of the way.
+    await expect(page.getByRole('heading', { name: 'Prepare field boundaries for CropForce' })).toBeHidden();
+    await expect(page.getByLabel('Draws into')).toHaveValue('new');
+
+    await drawRectangle(page);
+
+    await expect(page.getByText('New field drawn. Name it to make it exportable.')).toBeVisible();
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(1);
+    // Nothing is left ungrouped, so there is nothing to combine afterwards.
+    await expect(page.getByText('Ungrouped polygons')).toBeHidden();
+
+    // The cursor is already in the name box: typing names the field.
+    await page.keyboard.type('Long Acre');
+    await expect(attributeCell(page, 'field').first()).toHaveValue('Long Acre');
+  });
+
+  test('adds another block to the field it is aimed at', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Draw field' }).click();
+    await drawRectangle(page);
+    await page.keyboard.type('Long Acre');
+
+    // The field is still the one being worked on, so arming the tool aims at it.
+    await page.getByRole('button', { name: 'Draw', exact: true }).click();
+    await expect(page.getByLabel('Draws into')).toHaveValue(/^fld_/);
+
+    const map = page.locator('.leaflet-container');
+    const box = (await map.boundingBox())!;
+    const click = (dx: number, dy: number) =>
+      page.mouse.click(box.x + box.width / 2 + dx, box.y + box.height / 2 + dy);
+    await click(120, -80);
+    await click(220, -80);
+    await click(220, 60);
+    await page.mouse.dblclick(box.x + box.width / 2 + 120, box.y + box.height / 2 + 60);
+
+    await expect(page.getByText('Added a polygon to Long Acre.')).toBeVisible();
+    // One field, two polygons — not two fields.
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(1);
+    await page.locator('tbody tr').first().hover();
+    await expect(page.getByRole('button', { name: '2 polygons' })).toBeVisible();
+  });
+
+  test('sends the polygon wherever the picker says', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Draw field' }).click();
+    await drawRectangle(page);
+    await page.keyboard.type('Long Acre');
+
+    await page.getByRole('button', { name: 'Draw', exact: true }).click();
+    // Aimed at Long Acre, but sent to a new field instead.
+    await page.getByLabel('Draws into').selectOption('new');
+
+    const map = page.locator('.leaflet-container');
+    const box = (await map.boundingBox())!;
+    const click = (dx: number, dy: number) =>
+      page.mouse.click(box.x + box.width / 2 + dx, box.y + box.height / 2 + dy);
+    await click(120, -80);
+    await click(220, -80);
+    await click(220, 60);
+    await page.mouse.dblclick(box.x + box.width / 2 + 120, box.y + box.height / 2 + 60);
+
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(2);
+  });
+
+  test('aims at nothing in particular when no field is being worked on', async ({ page }) => {
+    await page.goto('/');
+    await importFixtures(page);
+
+    await page.getByRole('button', { name: 'Draw', exact: true }).click();
+    await expect(page.getByLabel('Draws into')).toHaveValue('new');
   });
 });

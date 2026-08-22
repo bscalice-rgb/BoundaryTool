@@ -34,9 +34,7 @@ export const es: Dictionary = {
     'KML, KMZ, shapefiles comprimidos y GeoJSON, tantos a la vez como quiera. Lo que no esté ' +
     'ya en WGS84 se reproyecta al entrar.',
   'empty.step2.title': 'Agrupe en lotes',
-  'empty.step2.body':
-    'Un lote es el conjunto de polígonos que usted decida que va junto. Selecciónelos, ' +
-    'combínelos en un lote y asígnele un nombre de Client, Farm y Field.',
+  'empty.step2.body': 'Un lote es el conjunto de polígonos que usted decida que va junto. Dibuje uno y se convierte en lote apenas lo cierre; agrupe los importados seleccionándolos y combinándolos en un lote. Después póngale un nombre de Client, Farm y Field.',
   'empty.step3.title': 'Corrija las alertas',
   'empty.step3.body':
     'El panel de calidad revisa cada lote frente a los criterios de contorno. Cada alerta ' +
@@ -151,9 +149,19 @@ export const es: Dictionary = {
   'history.jumpForward': 'Rehacer hasta aquí',
   'history.empty': 'Todavía no se hizo nada.',
 
+  'toolbar.drawInto': 'Dibujar en',
+  'toolbar.drawIntoNew': 'Un lote nuevo',
+  'toolbar.drawIntoHint': 'Dónde va a caer el próximo polígono que dibuje. Elija un lote para agregarle otro bloque.',
+  'tool.draw.hintNew': 'Haga clic para colocar cada vértice y luego doble clic para cerrar. El polígono se convierte en un lote nuevo, listo para nombrar.',
+  'tool.draw.hintField': 'Haga clic para colocar cada vértice y luego doble clic para cerrar. El polígono se suma a {field}.',
+  'toast.drewNewField': 'Lote nuevo dibujado. Póngale nombre para poder exportarlo.',
+  'toast.drewIntoField': 'Se agregó un polígono a {field}.',
+  'action.drawField': 'Dibujar un lote',
+  'action.drawIntoField': 'Dibujar en {field}',
+
   'fields.title': 'Lotes',
-  'fields.new': '+ Lote',
-  'fields.newHint': 'Crear una fila de lote vacía',
+  'fields.new': 'Dibujar lote',
+  'fields.newHint': 'Dibuje un contorno en el mapa; se convierte en un lote nuevo apenas lo cierre',
   'fields.attributeGuidance':
     'Client, Farm y Field son los únicos atributos que CropForce lee, y son la forma en que un ' +
     'contorno se asocia al productor y al establecimiento correctos. Mantenga la escritura ' +

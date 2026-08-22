@@ -32,9 +32,7 @@ export const en = {
     'KML, KMZ, zipped shapefiles and GeoJSON, as many at once as you like. Anything not ' +
     'already in WGS84 is reprojected on the way in.',
   'empty.step2.title': 'Group into fields',
-  'empty.step2.body':
-    'A field is whatever set of polygons you decide belongs together. Select them, combine ' +
-    'them into one field, and give it a Client, Farm and Field name.',
+  'empty.step2.body': 'A field is whatever set of polygons you decide belongs together. Draw one and it becomes a field as soon as you close it; group imported ones by selecting them and combining them into a field. Then give it a Client, Farm and Field name.',
   'empty.step3.title': 'Clean and fix flags',
   'empty.step3.body':
     'The quality panel checks each field against the boundary criteria. Every flag offers ' +
@@ -143,9 +141,19 @@ export const en = {
   'history.jumpForward': 'Redo up to here',
   'history.empty': 'Nothing done yet.',
 
+  'toolbar.drawInto': 'Draws into',
+  'toolbar.drawIntoNew': 'A new field',
+  'toolbar.drawIntoHint': 'Where the next polygon you draw will land. Pick a field to add another block to it.',
+  'tool.draw.hintNew': 'Click to place each vertex, then double-click to close. The polygon becomes a new field, ready to name.',
+  'tool.draw.hintField': 'Click to place each vertex, then double-click to close. The polygon joins {field}.',
+  'toast.drewNewField': 'New field drawn. Name it to make it exportable.',
+  'toast.drewIntoField': 'Added a polygon to {field}.',
+  'action.drawField': 'Draw a field',
+  'action.drawIntoField': 'Draw into {field}',
+
   'fields.title': 'Fields',
-  'fields.new': '+ Field',
-  'fields.newHint': 'Create an empty field row',
+  'fields.new': 'Draw field',
+  'fields.newHint': 'Draw a boundary on the map; it becomes a new field the moment you close it',
   'fields.attributeGuidance':
     'Client, Farm and Field are the only attributes CropForce reads, and they are how a ' +
     'boundary is matched to the right grower and holding. Keep the spelling identical ' +

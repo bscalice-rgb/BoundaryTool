@@ -15,11 +15,10 @@ import { useT } from './i18n';
 import LanguagePicker from './components/LanguagePicker';
 import { useWorkspaceHistory } from './state/history';
 import {
-  addDrawnFeature,
+  addDrawnToField,
   addImported,
   assignToField,
   combineIntoField,
-  createEmptyField,
   cutExclusionZone,
   deleteFeatures,
   deleteField,
@@ -130,6 +129,12 @@ export default function App() {
   const [fieldsWidth, setFieldsWidth] = useState(460);
   const [checksWidth, setChecksWidth] = useState(340);
   const [fieldsCollapsed, setFieldsCollapsed] = useState(false);
+  /**
+   * Where the next drawn polygon lands. Drawing and grouping were two separate steps
+   * with a manual join between them; this is the join, made explicit and visible in
+   * the toolbar so it is never a guess.
+   */
+  const [drawTarget, setDrawTarget] = useState<FieldId | 'new'>('new');
   const [checksCollapsed, setChecksCollapsed] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -335,9 +340,29 @@ export default function App() {
 
   const handleDrawPolygon = useCallback(
     (geometry: Polygon) => {
-      apply(t('action.draw'), (current) => addDrawnFeature(current, geometry));
+      // Worked out before dispatching, because the ids decide what happens next and
+      // the reducer does not run until the following render.
+      const outcome = addDrawnToField(workspace, geometry, drawTarget);
+      const field = outcome.workspace.fields.find((item) => item.id === outcome.fieldId);
+      const name = field ? describeField(field, t) : '';
+
+      if (outcome.created) {
+        apply(t('action.drawField'), () => outcome.workspace);
+        // Straight into the name box: a field that has just been drawn is a field
+        // about to be named, and the alternative is hunting for the row.
+        setSelection(new Set([outcome.featureId]));
+        setPinnedFields(new Set([outcome.fieldId]));
+        nonceRef.current += 1;
+        setAttributeFocus({ fieldId: outcome.fieldId, column: 'field', nonce: nonceRef.current });
+        setTool('select');
+        toast(t('toast.drewNewField'));
+        return;
+      }
+
+      apply(t('action.drawIntoField', { field: name }), () => outcome.workspace);
+      toast(t('toast.drewIntoField', { field: name }));
     },
-    [apply, t],
+    [apply, workspace, drawTarget, toast, t],
   );
 
   const handleCutHole = useCallback(
@@ -724,6 +749,29 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [history, deleteSelection, selection.size]);
 
+  /**
+   * Arming the draw tool aims it at the field being worked on, if there is exactly one.
+   * Seeded on entry rather than followed continuously: a target that moved every time
+   * the selection changed would be impossible to rely on mid-draw.
+   */
+  const wasDrawingRef = useRef(false);
+  useEffect(() => {
+    const drawing = tool === 'draw';
+    if (drawing && !wasDrawingRef.current) {
+      setDrawTarget(scopeFieldIds.size === 1 ? [...scopeFieldIds][0] : 'new');
+    }
+    wasDrawingRef.current = drawing;
+    // scopeFieldIds is read on entry only, so it is deliberately not a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool]);
+
+  // A target field that has since been deleted would silently become a new field.
+  useEffect(() => {
+    if (drawTarget !== 'new' && !workspace.fields.some((field) => field.id === drawTarget)) {
+      setDrawTarget('new');
+    }
+  }, [workspace.fields, drawTarget]);
+
   // A tool that needs a selection cannot stay armed once the selection is gone.
   useEffect(() => {
     if (selection.size === 0 && ['edit', 'move', 'split', 'simplify'].includes(tool)) {
@@ -913,7 +961,12 @@ export default function App() {
             }}
             onDeleteSelection={deleteSelection}
             onMergeSelection={mergeSelection}
-            onNewField={() => apply(t('action.addField'), createEmptyField)}
+            onNewField={() => {
+              setDrawTarget('new');
+              setSelection(new Set());
+              setPinnedFields(new Set());
+              setTool('draw');
+            }}
             onZoomToFeatures={zoomTo}
             showBlocked={exportAttempted}
             hoverFeatureIds={hoverFeatureIds}
@@ -942,6 +995,9 @@ export default function App() {
             selectionCount={selection.size}
             snapping={snapping}
             onSnappingChange={setSnapping}
+            drawTarget={drawTarget}
+            onDrawTargetChange={setDrawTarget}
+            fields={workspace.fields}
             basemap={basemap}
             onBasemapChange={setBasemap}
             onDeleteSelection={deleteSelection}
@@ -997,7 +1053,10 @@ export default function App() {
               </div>
             )}
 
-            {isEmpty && (
+            {/* The welcome panel covers the map, so choosing to draw has to move it out
+                of the way — otherwise the one button that starts a field from scratch
+                arms a tool the user cannot reach. */}
+            {isEmpty && tool !== 'draw' && (
               <div className="absolute inset-0 z-1000 bg-ink-950/92 backdrop-blur-[2px]">
                 <EmptyState onBrowse={() => fileInputRef.current?.click()} />
               </div>

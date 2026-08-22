@@ -90,6 +90,39 @@ export function addDrawnFeature(
   return { ...workspace, features: [...workspace.features, feature] };
 }
 
+/**
+ * A polygon drawn on the map, landing in a field.
+ *
+ * Drawing and grouping used to be two separate jobs: the polygon arrived ungrouped and
+ * had to be combined into a field afterwards, which is a step nobody wants and everybody
+ * has to remember. A boundary someone drew by hand is a boundary they meant, so it
+ * becomes a field there and then — a new one, or the one they said they were adding to.
+ *
+ * The caller gets the ids back because what happens next depends on them: a new field
+ * wants selecting and naming, an existing one does not.
+ */
+export function addDrawnToField(
+  workspace: Workspace,
+  geometry: PolyGeom,
+  target: FieldId | 'new',
+): { workspace: Workspace; fieldId: FieldId; featureId: FeatureId; created: boolean } {
+  const existing =
+    target === 'new' ? undefined : workspace.fields.find((field) => field.id === target);
+  // A target that has since been deleted falls back to a new field rather than
+  // dropping the polygon into nothing.
+  const field = existing ?? newField();
+  const feature = { ...newFeature(geometry, 'Drawn'), fieldId: field.id };
+  return {
+    workspace: {
+      fields: existing ? workspace.fields : [...workspace.fields, field],
+      features: [...workspace.features, feature],
+    },
+    fieldId: field.id,
+    featureId: feature.id,
+    created: !existing,
+  };
+}
+
 export function setGeometry(
   workspace: Workspace,
   featureId: FeatureId,
@@ -277,6 +310,11 @@ export function deleteField(
   return { fields: workspace.fields.filter((f) => f.id !== fieldId), features };
 }
 
+/**
+ * A field row with no geometry. Nothing in the interface makes one of these any more —
+ * drawing creates the field along with its first polygon — but the state can still be
+ * reached by deleting a field's last member, which is what the empty-field check is for.
+ */
 export function createEmptyField(workspace: Workspace): Workspace {
   return { ...workspace, fields: [...workspace.fields, newField()] };
 }

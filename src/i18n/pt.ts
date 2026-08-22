@@ -34,9 +34,7 @@ export const pt: Dictionary = {
     'KML, KMZ, shapefiles zipados e GeoJSON, quantos quiser de uma vez. O que não estiver ' +
     'em WGS84 é reprojetado na entrada.',
   'empty.step2.title': 'Agrupe em talhões',
-  'empty.step2.body':
-    'Um talhão é o conjunto de polígonos que você decidir que pertencem juntos. Selecione-os, ' +
-    'combine-os em um talhão e dê a ele um Client, Farm e Field.',
+  'empty.step2.body': 'Um talhão é o conjunto de polígonos que você decidir que vai junto. Desenhe um e ele vira um talhão assim que você fechar; agrupe os importados selecionando-os e combinando-os em um talhão. Depois dê a ele um nome de Client, Farm e Field.',
   'empty.step3.title': 'Corrija os apontamentos',
   'empty.step3.body':
     'O painel de qualidade verifica cada talhão conforme os critérios de contorno. Cada ' +
@@ -155,9 +153,19 @@ export const pt: Dictionary = {
   'history.jumpForward': 'Refazer até aqui',
   'history.empty': 'Nada feito ainda.',
 
+  'toolbar.drawInto': 'Desenhar em',
+  'toolbar.drawIntoNew': 'Um novo talhão',
+  'toolbar.drawIntoHint': 'Onde o próximo polígono desenhado vai parar. Escolha um talhão para acrescentar outro bloco a ele.',
+  'tool.draw.hintNew': 'Clique para posicionar cada vértice e dê um duplo clique para fechar. O polígono vira um novo talhão, pronto para receber o nome.',
+  'tool.draw.hintField': 'Clique para posicionar cada vértice e dê um duplo clique para fechar. O polígono entra em {field}.',
+  'toast.drewNewField': 'Novo talhão desenhado. Dê um nome a ele para poder exportar.',
+  'toast.drewIntoField': 'Polígono acrescentado a {field}.',
+  'action.drawField': 'Desenhar um talhão',
+  'action.drawIntoField': 'Desenhar em {field}',
+
   'fields.title': 'Talhões',
-  'fields.new': '+ Talhão',
-  'fields.newHint': 'Criar uma linha de talhão vazia',
+  'fields.new': 'Desenhar talhão',
+  'fields.newHint': 'Desenhe um contorno no mapa; ele vira um novo talhão assim que você fechar',
   'fields.attributeGuidance':
     'Client, Farm e Field são os únicos atributos que o CropForce lê, e são por eles que o ' +
     'contorno é associado ao produtor e à propriedade certos. Mantenha a grafia idêntica em ' +

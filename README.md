@@ -72,6 +72,13 @@ call anything.
    polygons that share a name are **not** merged: that is far more often two fields
    whose names collide than one field in two pieces, and the duplicate-name check puts
    the choice in front of you.
+
+   Drawing is the exception, because there the intent is not in doubt. **Draw field**
+   arms the draw tool; the moment you close the outline it becomes a field, selected
+   with the cursor already in its name box. The toolbar shows where the next polygon
+   will land — *Draws into: a new field*, or a field you pick — so a field farmed in
+   four blocks is drawn four times into the same row rather than assembled afterwards.
+   Arming the tool while a field is being worked on aims at that field automatically.
 3. **Name in bulk where it helps.** Search the list by client, farm, field or source
    file, tick what you find, and set one Client or Farm name across all of it at once.
    Field names stay per-row, because each one names a different field.

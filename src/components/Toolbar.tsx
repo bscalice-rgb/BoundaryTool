@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { Basemap, Tool } from '../types';
+import type { Basemap, FieldId, Tool, WField } from '../types';
 import { useT } from '../i18n';
 import type { StringKey } from '../i18n';
 import { formatHa, formatNum } from '../lib/geo';
+import { describeField } from '../lib/qa';
 import { Button, InfoDot } from './ui';
 
 export interface ToolSpec {
@@ -97,6 +98,10 @@ export interface ToolbarProps {
   selectionCount: number;
   snapping: boolean;
   onSnappingChange: (value: boolean) => void;
+  /** Where the next drawn polygon lands: a brand new field, or one that exists. */
+  drawTarget: FieldId | 'new';
+  onDrawTargetChange: (target: FieldId | 'new') => void;
+  fields: WField[];
   basemap: Basemap;
   onBasemapChange: (value: Basemap) => void;
   onDeleteSelection: () => void;
@@ -106,7 +111,21 @@ export interface ToolbarProps {
 export default function Toolbar(props: ToolbarProps) {
   const t = useT();
   const active = TOOLS.find((tool) => tool.id === props.tool);
-  const activeHint = active ? t(active.hintKey) : '';
+  const targetField =
+    props.drawTarget === 'new'
+      ? null
+      : (props.fields.find((field) => field.id === props.drawTarget) ?? null);
+
+  // The draw tool says where the polygon will end up, because that is the only thing
+  // about it worth knowing and it used to be a step you had to remember afterwards.
+  const activeHint =
+    props.tool === 'draw'
+      ? targetField
+        ? t('tool.draw.hintField', { field: describeField(targetField, t) })
+        : t('tool.draw.hintNew')
+      : active
+        ? t(active.hintKey)
+        : '';
 
   return (
     <div className="flex shrink-0 flex-col border-b border-ink-800 bg-ink-900">
@@ -199,6 +218,31 @@ export default function Toolbar(props: ToolbarProps) {
           {activeHint}
         </span>
         {active && <InfoDot text={activeHint} label={t(active.labelKey)} />}
+
+        {props.tool === 'draw' && (
+          <label
+            className="flex shrink-0 items-center gap-1.5 text-[11px] text-ink-400"
+            title={t('toolbar.drawIntoHint')}
+          >
+            {t('toolbar.drawInto')}
+            <select
+              value={props.drawTarget}
+              onChange={(event) =>
+                props.onDrawTargetChange(event.target.value as FieldId | 'new')
+              }
+              aria-label={t('toolbar.drawInto')}
+              className="max-w-44 rounded border border-ink-700 bg-ink-950 px-1.5 py-0.5
+                text-[11px] text-ink-100 focus:border-crop-500 focus:outline-none"
+            >
+              <option value="new">{t('toolbar.drawIntoNew')}</option>
+              {props.fields.map((field) => (
+                <option key={field.id} value={field.id}>
+                  {describeField(field, t)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
 
         {/* Snapping lives with the readouts rather than the actions: it is a mode that
             stays on across tools, not something you do once. */}
