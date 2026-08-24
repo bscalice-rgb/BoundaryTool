@@ -212,6 +212,20 @@ input[type='range'] {
   box-shadow: inset 3px 0 0 var(--color-crop-400);
 }
 
+/* --------------------------------------------------------- map controls */
+
+/*
+ * Leaflet puts its controls at z-index 1000. The welcome panel that covers the map
+ * before anything is loaded sat at exactly the same level and came later in the
+ * document, so it won — which made the zoom, locate and go-to-coordinates buttons
+ * unclickable on a fresh workspace. That is the one moment someone most needs them:
+ * finding the ground you are about to draw a field on is the first thing you do.
+ */
+.leaflet-top,
+.leaflet-bottom {
+  z-index: 1100;
+}
+
 /* ------------------------------------------------------------ panel resizing */
 
 /*

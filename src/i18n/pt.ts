@@ -118,10 +118,7 @@ export const pt: Dictionary = {
     'Não foi possível obter sua localização: o navegador não respondeu a tempo. Se ele pediu ' +
     'permissão, aceite o aviso e pressione o botão novamente — a espera conta contra a ' +
     'solicitação.',
-  'map.error.unavailable':
-    'Não foi possível obter sua localização: seu dispositivo não conseguiu determinar onde ' +
-    'está{detail}. Um computador sem GPS depende do serviço de localização do próprio ' +
-    'navegador, que muitas vezes não está disponível — mova o mapa até seus talhões.',
+  'map.error.unavailable': 'Não foi possível obter sua localização: seu dispositivo não conseguiu determinar onde está. Um computador sem GPS depende do serviço de localização do próprio navegador, que muitas vezes não está disponível — em vez disso, navegue no mapa até seus talhões.',
 
   'status.empty': 'Solte arquivos de contorno em qualquer lugar para começar',
   'status.group.one': '1 polígono esperando para ser agrupado em um talhão',
@@ -162,6 +159,10 @@ export const pt: Dictionary = {
   'toast.drewIntoField': 'Polígono acrescentado a {field}.',
   'action.drawField': 'Desenhar um talhão',
   'action.drawIntoField': 'Desenhar em {field}',
+
+  'map.error.diagnostic': ' O navegador informou o código {code}: {message}',
+  'map.located': 'Você está aqui, com precisão de {accuracy}.',
+  'map.locatedCoarse': 'Posição apenas aproximada: seu navegador localizou você com precisão de {accuracy}, então esta é a região certa, não o talhão certo. Navegue a partir daqui.',
 
   'fields.title': 'Talhões',
   'fields.new': 'Desenhar talhão',

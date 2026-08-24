@@ -6,6 +6,12 @@ import type { Basemap, FeatureId, PolyGeom, Tool, WFeature, Workspace } from '..
 import { useT } from '../i18n';
 import type { Translator } from '../i18n';
 import { areaHa, formatHa } from '../lib/geo';
+import {
+  GEOLOCATION_DENIED,
+  GEOLOCATION_TIMEOUT,
+  GEOLOCATION_UNAVAILABLE,
+  clampLocateZoom,
+} from '../lib/locate';
 
 const ESRI_IMAGERY =
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
@@ -74,18 +80,27 @@ async function permissionState(): Promise<PermissionState | null> {
  * Turns a geolocation failure into something worth reading. The browser's own message
  * ("position update is unavailable") tells a user nothing about what to do next.
  */
-function describeLocationError(event: L.ErrorEvent, t: Translator): string {
-  const detail = event.message
-    ? ` (${event.message.replace(/^Geolocation error:\s*/i, '').replace(/\.$/, '')})`
-    : '';
-  switch (event.code) {
-    case 1:
-      return t('map.error.denied');
-    case 3:
-      return t('map.error.timeout');
-    default:
-      return t('map.error.unavailable', { detail });
-  }
+function describeLocationError(
+  error: GeolocationPositionError,
+  t: Translator,
+  permission: PermissionState | null,
+): string {
+  const key =
+    error.code === GEOLOCATION_DENIED
+      ? // A block is remembered per site, so the wording that names the address-bar
+        // control is only right when this origin really is blocked; a dismissed prompt
+        // needs different advice.
+        permission === 'denied'
+        ? 'map.error.blocked'
+        : 'map.error.denied'
+      : error.code === GEOLOCATION_TIMEOUT
+        ? 'map.error.timeout'
+        : 'map.error.unavailable';
+  // The browser's own words are appended rather than swallowed: three rounds of this
+  // bug were spent guessing at what the failure actually was.
+  return error.message
+    ? t(key) + t('map.error.diagnostic', { code: error.code, message: error.message })
+    : t(key);
 }
 
 /**
@@ -141,6 +156,8 @@ export interface MapViewProps {
   onLocationError: (message: string) => void;
   /** A message while a position is being fetched, or null once it settles. */
   onLocatingChange: (hint: string | null) => void;
+  /** How good the fix turned out to be, in metres, once one arrives. */
+  onLocated: (accuracyMeters: number) => void;
   /** Opens the "go to coordinates" prompt, which lives in the app's dialog layer. */
   onOpenCoordinates: () => void;
   /** A position to centre on, set when the user confirms a coordinate jump. */
@@ -220,22 +237,6 @@ export default function MapView(props: MapViewProps) {
      * coarse attempt fails, the precise one is worth a try: on a phone with no network
      * location, GPS is exactly what does work.
      */
-    const startLocate = (precise: boolean, hint: string) => {
-      locateAttemptRef.current = precise ? 'precise' : 'coarse';
-      map.getContainer().classList.add('locating');
-      propsRef.current.onLocatingChange(hint);
-      map.locate({
-        setView: true,
-        maxZoom: 16,
-        enableHighAccuracy: precise,
-        // The clock starts when the call is made, and on a first visit it runs while the
-        // browser's own permission prompt is sitting on screen waiting to be clicked.
-        // Anything short enough to feel responsive gives up before the user has answered.
-        timeout: precise ? 25_000 : 30_000,
-        maximumAge: precise ? 0 : 60_000,
-      });
-    };
-
     const finishLocate = (message: string | null) => {
       locateAttemptRef.current = 'idle';
       map.getContainer().classList.remove('locating');
@@ -243,47 +244,40 @@ export default function MapView(props: MapViewProps) {
       if (message) propsRef.current.onLocationError(message);
     };
 
-    locateControl(() => {
-      void (async () => {
-        if (!('geolocation' in navigator)) {
-          finishLocate(tRef.current('map.error.unsupported'));
-          return;
-        }
-        if (!window.isSecureContext) {
-          finishLocate(tRef.current('map.error.insecure'));
-          return;
-        }
-
-        // Asking the Permissions API first turns a silent 30-second wait into either an
-        // immediate answer or an accurate hint about what the browser is about to do.
-        const state = await permissionState();
-        if (state === 'denied') {
-          finishLocate(tRef.current('map.error.blocked'));
-          return;
-        }
-        startLocate(
-          false,
-          tRef.current(state === 'prompt' ? 'map.locatingPrompt' : 'map.locating'),
-        );
-      })();
-    }).addTo(map);
-
-    coordinateControl(() => propsRef.current.onOpenCoordinates()).addTo(map);
-
-    map.on('locationfound', (event: L.LocationEvent) => {
+    /**
+     * Puts the map on a fix.
+     *
+     * The zoom is worked out here rather than by Leaflet's `locate({ setView: true })`,
+     * which frames the accuracy circle and caps the result at maxZoom. On a desktop the
+     * circle is tens of kilometres across, so that framing zooms *out* — pressing the
+     * button while looking at a field would throw the view away and show the region.
+     */
+    const showPosition = (position: GeolocationPosition) => {
       finishLocate(null);
+      const latlng = L.latLng(position.coords.latitude, position.coords.longitude);
+      const accuracy = Number.isFinite(position.coords.accuracy)
+        ? Math.max(0, position.coords.accuracy)
+        : 0;
+
+      const fit = accuracy > 0 ? map.getBoundsZoom(latlng.toBounds(accuracy * 2)) : MAX_ZOOM;
+      map.setView(latlng, clampLocateZoom(fit));
+
       locationLayerRef.current?.remove();
       locationLayerRef.current = L.layerGroup([
-        L.circle(event.latlng, {
-          radius: Math.max(event.accuracy, 5),
-          className: 'location-accuracy',
-          color: '#38bdf8',
-          weight: 1,
-          fillColor: '#38bdf8',
-          fillOpacity: 0.12,
-          interactive: false,
-        }),
-        L.circleMarker(event.latlng, {
+        ...(accuracy > 0
+          ? [
+              L.circle(latlng, {
+                radius: Math.max(accuracy, 5),
+                className: 'location-accuracy',
+                color: '#38bdf8',
+                weight: 1,
+                fillColor: '#38bdf8',
+                fillOpacity: 0.12,
+                interactive: false,
+              }),
+            ]
+          : []),
+        L.circleMarker(latlng, {
           radius: 5,
           className: 'location-dot',
           color: '#ffffff',
@@ -293,18 +287,61 @@ export default function MapView(props: MapViewProps) {
           interactive: false,
         }),
       ]).addTo(map);
-    });
 
-    map.on('locationerror', (event: L.ErrorEvent) => {
-      // Escalating to high accuracy only helps where there is a GPS the coarse lookup did
-      // not consult. A timeout must NOT escalate: on a laptop with no GPS, asking for high
-      // accuracy is the surest way to turn "slow" into "impossible".
-      if (locateAttemptRef.current === 'coarse' && event.code === 2) {
+      propsRef.current.onLocated(accuracy);
+    };
+
+    const onLocateError = (error: GeolocationPositionError) => {
+      // Escalating to high accuracy only helps where there is a GPS the coarse lookup
+      // did not consult. A timeout must NOT escalate: on a laptop with no GPS, asking
+      // for high accuracy is the surest way to turn "slow" into "impossible".
+      if (locateAttemptRef.current === 'coarse' && error.code === GEOLOCATION_UNAVAILABLE) {
         startLocate(true, tRef.current('map.locatingPrecise'));
         return;
       }
-      finishLocate(describeLocationError(event, tRef.current));
-    });
+      // Only the failure path waits on the Permissions API, and only to choose between
+      // two wordings — never to decide whether to ask the browser in the first place.
+      void permissionState().then((state) =>
+        finishLocate(describeLocationError(error, tRef.current, state)),
+      );
+    };
+
+    const startLocate = (precise: boolean, hint: string) => {
+      locateAttemptRef.current = precise ? 'precise' : 'coarse';
+      map.getContainer().classList.add('locating');
+      propsRef.current.onLocatingChange(hint);
+      navigator.geolocation.getCurrentPosition(showPosition, onLocateError, {
+        enableHighAccuracy: precise,
+        // The clock starts when the call is made, and on a first visit it runs while the
+        // browser's own permission prompt is sitting on screen waiting to be clicked.
+        // Anything short enough to feel responsive gives up before the user has answered.
+        timeout: precise ? 25_000 : 30_000,
+        maximumAge: precise ? 0 : 60_000,
+      });
+    };
+
+    locateControl(() => {
+      if (!('geolocation' in navigator)) {
+        finishLocate(tRef.current('map.error.unsupported'));
+        return;
+      }
+      if (!window.isSecureContext) {
+        finishLocate(tRef.current('map.error.insecure'));
+        return;
+      }
+
+      // The request goes out first and unconditionally. The Permissions API only ever
+      // improves the waiting message: an earlier version used it as a gate, so a stale
+      // or wrong "denied" reading meant the browser was never actually asked.
+      startLocate(false, tRef.current('map.locating'));
+      void permissionState().then((state) => {
+        if (state === 'prompt' && locateAttemptRef.current !== 'idle') {
+          propsRef.current.onLocatingChange(tRef.current('map.locatingPrompt'));
+        }
+      });
+    }).addTo(map);
+
+    coordinateControl(() => propsRef.current.onOpenCoordinates()).addTo(map);
 
     map.pm.setGlobalOptions({ snappable: true, snapDistance: SNAP_DISTANCE });
 

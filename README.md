@@ -48,7 +48,17 @@ clicked, and that wait counts against the request, so the button allows thirty s
 and shows what it is waiting for rather than giving up early. On a laptop with no GPS the
 answer comes from a network lookup that is slow rather than absent — asking it for high
 accuracy is a good way to turn slow into impossible, so that is only tried when the first
-attempt reports it genuinely cannot place the device.
+attempt reports it genuinely cannot place the device. The request always goes out: the
+Permissions API is consulted only to word the waiting message, never to decide whether
+to ask, because a stale reading there is indistinguishable from a browser that refused.
+
+A desktop fix is often accurate to tens of kilometres rather than tens of metres, so the
+button says how good the answer was — *you are here, to within 40 m*, or *approximate
+position only… this is the right district rather than the right field*. It also refuses
+to zoom out past a district view: framing the accuracy circle, which is what a map
+library will do by default, means a vague fix throws away the close-in view you already
+had and shows you half a country. When it fails, the message carries the browser's own
+error code and wording, so a report of it is something anyone can act on.
 
 Where it still cannot, there is a **go to coordinates** button beside it. Paste a latitude
 and longitude, a `geo:` link, or a URL copied from Google Maps or OpenStreetMap, and the

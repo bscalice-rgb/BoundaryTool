@@ -12,6 +12,13 @@ import {
 import type { Lang } from '../i18n/translator';
 import { runChecks } from '../lib/qa';
 import { fieldColor } from '../lib/colors';
+import {
+  MAX_LOCATE_ZOOM,
+  MIN_LOCATE_ZOOM,
+  clampLocateZoom,
+  describeAccuracy,
+  isCoarse,
+} from '../lib/locate';
 import { newFeature, newField } from '../state/ops';
 import { poly, squareRing } from './fixtures';
 
@@ -168,5 +175,35 @@ describe('field colours', () => {
     expect(fieldColor(3)).toBe(fieldColor(3));
     expect(fieldColor(0)).toMatch(/^#[0-9a-f]{6}$/);
     expect(fieldColor(17)).toMatch(/^#[0-9a-f]{6}$/);
+  });
+});
+
+describe('locating', () => {
+  // The bug this exists for: Leaflet frames the accuracy circle, so a desktop fix
+  // accurate to 30 km "zoomed to your location" by zooming out to the whole region.
+  it('never zooms further out than the view was worth keeping', () => {
+    expect(clampLocateZoom(4)).toBe(MIN_LOCATE_ZOOM);
+    expect(clampLocateZoom(-3)).toBe(MIN_LOCATE_ZOOM);
+  });
+
+  it('never zooms deeper than the imagery can answer for', () => {
+    expect(clampLocateZoom(22)).toBe(MAX_LOCATE_ZOOM);
+  });
+
+  it('leaves a sensible fit alone', () => {
+    expect(clampLocateZoom(14)).toBe(14);
+  });
+
+  it('calls a fix approximate only when it is', () => {
+    expect(isCoarse(40)).toBe(false);
+    expect(isCoarse(5_000)).toBe(false);
+    expect(isCoarse(30_000)).toBe(true);
+  });
+
+  it('says the accuracy in units that suit it', () => {
+    expect(describeAccuracy(45)).toBe('45 m');
+    expect(describeAccuracy(1_240)).toBe('1.2 km');
+    expect(describeAccuracy(32_000)).toBe('32 km');
+    expect(describeAccuracy(0)).toBe('—');
   });
 });

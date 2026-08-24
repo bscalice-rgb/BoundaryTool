@@ -106,10 +106,7 @@ export const en = {
     'Could not get your location: the browser did not answer in time. If it asked for ' +
     'permission, accept the prompt and press the button again — the wait counts against ' +
     'the request.',
-  'map.error.unavailable':
-    'Could not get your location: your device could not work out where it is{detail}. A ' +
-    "desktop without GPS relies on the browser's own location service, which is often " +
-    'unavailable — pan the map to your fields instead.',
+  'map.error.unavailable': "Could not get your location: your device could not work out where it is. A desktop without GPS relies on the browser's own location service, which is often unavailable — pan the map to your fields instead.",
 
   'status.empty': 'Drop boundary files anywhere to begin',
   'status.group.one': '1 polygon waiting to be grouped into a field',
@@ -150,6 +147,10 @@ export const en = {
   'toast.drewIntoField': 'Added a polygon to {field}.',
   'action.drawField': 'Draw a field',
   'action.drawIntoField': 'Draw into {field}',
+
+  'map.error.diagnostic': ' The browser reported code {code}: {message}',
+  'map.located': 'You are here, to within {accuracy}.',
+  'map.locatedCoarse': 'Approximate position only: your browser placed you to within {accuracy}, so this is the right district rather than the right field. Pan from here.',
 
   'fields.title': 'Fields',
   'fields.new': 'Draw field',

@@ -114,10 +114,7 @@ export const es: Dictionary = {
   'map.error.timeout':
     'No se pudo obtener su ubicación: el navegador no respondió a tiempo. Si le pidió permiso, ' +
     'acepte el aviso y presione el botón otra vez — la espera cuenta contra la solicitud.',
-  'map.error.unavailable':
-    'No se pudo obtener su ubicación: su dispositivo no logró determinar dónde está{detail}. ' +
-    'Una computadora de escritorio sin GPS depende del servicio de ubicación del propio ' +
-    'navegador, que a menudo no está disponible — desplace el mapa hasta sus lotes en su lugar.',
+  'map.error.unavailable': 'No se pudo obtener su ubicación: su dispositivo no logró determinar dónde está. Una computadora sin GPS depende del servicio de ubicación del propio navegador, que a menudo no está disponible — desplace el mapa hasta sus lotes en su lugar.',
 
   'status.empty': 'Suelte archivos de contornos en cualquier parte para empezar',
   'status.group.one': '1 polígono esperando ser agrupado en un lote',
@@ -158,6 +155,10 @@ export const es: Dictionary = {
   'toast.drewIntoField': 'Se agregó un polígono a {field}.',
   'action.drawField': 'Dibujar un lote',
   'action.drawIntoField': 'Dibujar en {field}',
+
+  'map.error.diagnostic': ' El navegador informó el código {code}: {message}',
+  'map.located': 'Está aquí, con una precisión de {accuracy}.',
+  'map.locatedCoarse': 'Posición solo aproximada: su navegador lo ubicó con una precisión de {accuracy}, así que esta es la zona correcta, no el lote correcto. Desplácese desde aquí.',
 
   'fields.title': 'Lotes',
   'fields.new': 'Dibujar lote',

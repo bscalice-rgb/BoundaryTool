@@ -445,7 +445,10 @@ test.describe('bulk naming', () => {
 });
 
 test.describe('zoom to my location', () => {
-  test.use({ geolocation: { latitude: 48.8566, longitude: 2.3522 }, permissions: ['geolocation'] });
+  test.use({
+    geolocation: { latitude: 48.8566, longitude: 2.3522, accuracy: 30 },
+    permissions: ['geolocation'],
+  });
 
   test('centres the map on the reported position and marks it', async ({ page }) => {
     await page.goto('/');
@@ -458,6 +461,90 @@ test.describe('zoom to my location', () => {
     await expect(page.locator('.location-accuracy')).toHaveCount(1);
     await expect(page.locator('.leaflet-control-scale-line').first()).toHaveText(/\bm$/);
   });
+});
+
+test.describe('zoom to my location, on a fresh workspace', () => {
+  test.use({ geolocation: { latitude: 48.8566, longitude: 2.3522 }, permissions: ['geolocation'] });
+
+  // Leaflet's controls sit at z-index 1000 and so did the welcome panel, which came
+  // later in the document and therefore won. Every map control was unclickable until
+  // something had been loaded — which is exactly backwards.
+  test('can be pressed before anything has been loaded', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: 'Prepare field boundaries for CropForce' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Zoom to my location' }).click();
+    await expect(page.locator('.location-dot')).toBeVisible();
+  });
+
+  test('the other map controls are reachable too', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Go to coordinates' }).click();
+    await expect(page.getByRole('dialog', { name: 'Go to coordinates' })).toBeVisible();
+  });
+});
+
+test.describe('a fix that is only roughly right', () => {
+  /** What a desktop without GPS actually reports: the right region, not the right field. */
+  async function coarseFix(page: Page, accuracy: number) {
+    await page.addInitScript((metres) => {
+      Object.defineProperty(navigator, 'geolocation', {
+        configurable: true,
+        value: {
+          getCurrentPosition: (ok: (position: unknown) => void) =>
+            ok({ coords: { latitude: 48.8566, longitude: 2.3522, accuracy: metres } }),
+        },
+      });
+    }, accuracy);
+  }
+
+  // Leaflet's locate({ setView: true }) frames the accuracy circle, so a fix good to
+  // 180 km "zoomed to your location" by showing half of France. Pressing the button
+  // while looking at a field threw the view away.
+  test('zooms in on the district rather than out to the region', async ({ page }) => {
+    await coarseFix(page, 180_000);
+    await page.goto('/');
+
+    await page.getByRole('button', { name: 'Zoom to my location' }).click();
+    await expect(page.locator('.location-dot')).toBeVisible();
+
+    // The map starts at a continental zoom; a coarse fix must still improve on it.
+    await expect(page.locator('.leaflet-control-scale-line').first()).toHaveText('20 km');
+    await expect(page.getByText(/Approximate position only/)).toBeVisible();
+    await expect(page.getByText(/180 km/)).toBeVisible();
+  });
+
+  test('says how good a good fix was', async ({ page }) => {
+    await coarseFix(page, 40);
+    await page.goto('/');
+
+    await page.getByRole('button', { name: 'Zoom to my location' }).click();
+    await expect(page.getByText('You are here, to within 40 m.')).toBeVisible();
+    await expect(page.getByText(/Approximate position only/)).toBeHidden();
+  });
+});
+
+test('asks the browser even when the Permissions API says no', async ({ page }) => {
+  // The Permissions API used to gate the request, so a stale or wrong reading meant the
+  // browser was never actually asked — indistinguishable, from the outside, from a
+  // browser that refused.
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'permissions', {
+      configurable: true,
+      value: { query: async () => ({ state: 'denied' }) },
+    });
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: {
+        getCurrentPosition: (ok: (position: unknown) => void) =>
+          ok({ coords: { latitude: 48.8566, longitude: 2.3522, accuracy: 60 } }),
+      },
+    });
+  });
+  await page.goto('/');
+
+  await page.getByRole('button', { name: 'Zoom to my location' }).click();
+  await expect(page.locator('.location-dot')).toBeVisible();
 });
 
 test('waits for a slow permission prompt instead of timing out', async ({ page }) => {
@@ -545,9 +632,10 @@ test('says how to unblock a site the browser has blocked', async ({ page }) => {
     Object.defineProperty(navigator, 'geolocation', {
       configurable: true,
       value: {
-        getCurrentPosition: () => {
-          throw new Error('should not be called when the permission is already denied');
-        },
+        getCurrentPosition: (
+          _ok: (position: unknown) => void,
+          fail: (error: unknown) => void,
+        ) => fail({ code: 1, message: 'User denied Geolocation' }),
         watchPosition: () => 0,
         clearWatch: () => {},
       },
@@ -557,7 +645,10 @@ test('says how to unblock a site the browser has blocked', async ({ page }) => {
   await importFixtures(page);
 
   await page.getByRole('button', { name: 'Zoom to my location' }).click();
+  // The browser is still asked; the Permissions reading only picks the wording that
+  // names the control the user has to change.
   await expect(page.getByText(/set Location to Allow/)).toBeVisible();
+  await expect(page.getByText(/code 1: User denied Geolocation/)).toBeVisible();
 });
 
 test('retries at high accuracy when the coarse attempt reports no position', async ({ page }) => {

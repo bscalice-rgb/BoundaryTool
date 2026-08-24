@@ -52,6 +52,7 @@ import {
 } from './lib/export';
 import { UNGROUPED_COLOR, fieldColor } from './lib/colors';
 import { describeField } from './lib/qa';
+import { describeAccuracy, isCoarse } from './lib/locate';
 import MapView, { type FocusRequest } from './components/MapView';
 import { CollapsedRail, PanelResizer, SidePanel } from './components/SidePanel';
 import ShortcutSheet from './components/ShortcutSheet';
@@ -1024,6 +1025,19 @@ export default function App() {
               labelFor={labelFor}
               onLocationError={(message) => toast(message, 'error')}
               onLocatingChange={setLocating}
+              onLocated={(accuracy) => {
+                // A fix good to 30 km is a real answer to a different question, so it
+                // says so rather than leaving the user to wonder why the map landed
+                // somewhere near but not right. A browser that reports no accuracy at
+                // all gets no claim made on its behalf; the dot is the message.
+                if (accuracy <= 0) return;
+                const value = describeAccuracy(accuracy);
+                toast(
+                  isCoarse(accuracy)
+                    ? t('map.locatedCoarse', { accuracy: value })
+                    : t('map.located', { accuracy: value }),
+                );
+              }}
               onOpenCoordinates={() => setCoordinatesOpen(true)}
               goTo={goTo}
             />
