@@ -106,7 +106,7 @@ export const en = {
     'Could not get your location: the browser did not answer in time. If it asked for ' +
     'permission, accept the prompt and press the button again — the wait counts against ' +
     'the request.',
-  'map.error.unavailable': "Could not get your location: your device could not work out where it is. A desktop without GPS relies on the browser's own location service, which is often unavailable — pan the map to your fields instead.",
+  'map.error.unavailable': "Could not get your location: the browser's location service could not place this device. On a desktop that usually means the operating system's location is switched off — Windows: Settings › Privacy & security › Location. macOS: System Settings › Privacy & Security › Location Services, with Chrome ticked. Sites that still find you are looking up your IP on their own servers, which this tool does not do.",
 
   'status.empty': 'Drop boundary files anywhere to begin',
   'status.group.one': '1 polygon waiting to be grouped into a field',

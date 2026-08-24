@@ -114,7 +114,7 @@ export const es: Dictionary = {
   'map.error.timeout':
     'No se pudo obtener su ubicación: el navegador no respondió a tiempo. Si le pidió permiso, ' +
     'acepte el aviso y presione el botón otra vez — la espera cuenta contra la solicitud.',
-  'map.error.unavailable': 'No se pudo obtener su ubicación: su dispositivo no logró determinar dónde está. Una computadora sin GPS depende del servicio de ubicación del propio navegador, que a menudo no está disponible — desplace el mapa hasta sus lotes en su lugar.',
+  'map.error.unavailable': 'No se pudo obtener su ubicación: el servicio de ubicación del navegador no logró situar este dispositivo. En una computadora eso suele significar que la ubicación del sistema operativo está apagada — Windows: Configuración › Privacidad y seguridad › Ubicación. macOS: Ajustes del Sistema › Privacidad y seguridad › Servicios de ubicación, con Chrome tildado. Los sitios que igual lo encuentran consultan su IP en sus propios servidores, algo que esta herramienta no hace.',
 
   'status.empty': 'Suelte archivos de contornos en cualquier parte para empezar',
   'status.group.one': '1 polígono esperando ser agrupado en un lote',

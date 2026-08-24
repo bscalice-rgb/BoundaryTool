@@ -708,10 +708,18 @@ test('explains a device that cannot locate itself at all', async ({ page }) => {
   await importFixtures(page);
 
   await page.getByRole('button', { name: 'Zoom to my location' }).click();
-  // The advice has to be actionable, not the browser's own opaque wording.
-  await expect(page.getByText(/could not work out where it is/)).toBeVisible();
-  await expect(page.getByText(/pan the map to your fields instead/)).toBeVisible();
+
+  // This is the failure a desktop actually hits, so the message names its actual cause
+  // rather than shrugging at the device, and says why other sites still manage it.
+  await expect(page.getByText(/operating system's location is switched off/)).toBeVisible();
+  await expect(page.getByText(/Windows: Settings › Privacy & security › Location/)).toBeVisible();
+  await expect(page.getByText(/looking up your IP on their own servers/)).toBeVisible();
+  await expect(page.getByText(/code 2: Position update is unavailable/)).toBeVisible();
   await expect(page.locator('.location-dot')).toHaveCount(0);
+
+  // And it is not a dead end: the way to say where you are by hand is right there.
+  await page.getByRole('button', { name: 'Go to coordinates' }).last().click();
+  await expect(page.getByRole('dialog', { name: 'Go to coordinates' })).toBeVisible();
 });
 
 test('reports a refused location rather than failing silently', async ({ page }) => {

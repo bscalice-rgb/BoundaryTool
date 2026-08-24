@@ -190,25 +190,55 @@ export interface Toast {
   id: number;
   text: string;
   tone: 'info' | 'error';
+  /** A way out, for a message that would otherwise be a dead end. */
+  action?: { label: string; onClick: () => void };
 }
 
-export function ToastStack({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: number) => void }) {
+export function ToastStack({
+  toasts,
+  onDismiss,
+}: {
+  toasts: Toast[];
+  onDismiss: (id: number) => void;
+}) {
   return (
     <div className="pointer-events-none fixed bottom-4 left-1/2 z-1500 flex -translate-x-1/2 flex-col items-center gap-2">
       {toasts.map((toast) => (
-        <button
+        <div
           key={toast.id}
-          type="button"
-          onClick={() => onDismiss(toast.id)}
-          className={`pointer-events-auto max-w-lg rounded-md border px-3 py-2 text-xs shadow-xl
+          className={`pointer-events-auto flex max-w-xl items-start gap-3 rounded-md border
+            px-3 py-2 text-xs shadow-xl
             ${
               toast.tone === 'error'
                 ? 'border-red-700/70 bg-red-950/95 text-red-100'
                 : 'border-ink-600 bg-ink-850/95 text-ink-100'
             }`}
         >
-          {toast.text}
-        </button>
+          <button
+            type="button"
+            onClick={() => onDismiss(toast.id)}
+            className="min-w-0 flex-1 text-left leading-relaxed"
+          >
+            {toast.text}
+          </button>
+          {toast.action && (
+            <button
+              type="button"
+              onClick={() => {
+                toast.action!.onClick();
+                onDismiss(toast.id);
+              }}
+              className={`shrink-0 self-center rounded border px-2 py-1 font-medium
+                ${
+                  toast.tone === 'error'
+                    ? 'border-red-400/60 hover:bg-red-900/70'
+                    : 'border-ink-500 hover:bg-ink-800'
+                }`}
+            >
+              {toast.action.label}
+            </button>
+          )}
+        </div>
       ))}
     </div>
   );

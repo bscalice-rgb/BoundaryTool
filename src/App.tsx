@@ -143,11 +143,16 @@ export default function App() {
 
   /* ------------------------------------------------------------- feedback */
 
-  const toast = useCallback((text: string, tone: Toast['tone'] = 'info') => {
-    const id = Date.now() + Math.random();
-    setToasts((current) => [...current.slice(-2), { id, text, tone }]);
-    setTimeout(() => setToasts((current) => current.filter((item) => item.id !== id)), 6000);
-  }, []);
+  const toast = useCallback(
+    (text: string, tone: Toast['tone'] = 'info', action?: Toast['action']) => {
+      const id = Date.now() + Math.random();
+      setToasts((current) => [...current.slice(-2), { id, text, tone, action }]);
+      // A message carrying a way out is worth reading twice, so it stays longer.
+      const life = action ? 20_000 : 6_000;
+      setTimeout(() => setToasts((current) => current.filter((item) => item.id !== id)), life);
+    },
+    [],
+  );
 
   /* ------------------------------------------------------ derived workspace */
 
@@ -1023,7 +1028,14 @@ export default function App() {
               hoverFeatureIds={hoverFeatureIds}
               onHoverFeatures={hoverFeatures}
               labelFor={labelFor}
-              onLocationError={(message) => toast(message, 'error')}
+              onLocationError={(message) =>
+                // Never a dead end: the browser failing to place the device is exactly
+                // when saying where you are by hand becomes the thing to do.
+                toast(message, 'error', {
+                  label: t('map.coordinates'),
+                  onClick: () => setCoordinatesOpen(true),
+                })
+              }
               onLocatingChange={setLocating}
               onLocated={(accuracy) => {
                 // A fix good to 30 km is a real answer to a different question, so it

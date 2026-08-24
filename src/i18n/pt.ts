@@ -118,7 +118,7 @@ export const pt: Dictionary = {
     'Não foi possível obter sua localização: o navegador não respondeu a tempo. Se ele pediu ' +
     'permissão, aceite o aviso e pressione o botão novamente — a espera conta contra a ' +
     'solicitação.',
-  'map.error.unavailable': 'Não foi possível obter sua localização: seu dispositivo não conseguiu determinar onde está. Um computador sem GPS depende do serviço de localização do próprio navegador, que muitas vezes não está disponível — em vez disso, navegue no mapa até seus talhões.',
+  'map.error.unavailable': 'Não foi possível obter sua localização: o serviço de localização do navegador não conseguiu situar este dispositivo. Em um computador, isso costuma significar que a localização do sistema operacional está desligada — Windows: Configurações › Privacidade e segurança › Localização. macOS: Ajustes do Sistema › Privacidade e Segurança › Serviços de Localização, com o Chrome marcado. Os sites que ainda encontram você consultam seu IP nos servidores deles, o que esta ferramenta não faz.',
 
   'status.empty': 'Solte arquivos de contorno em qualquer lugar para começar',
   'status.group.one': '1 polígono esperando para ser agrupado em um talhão',

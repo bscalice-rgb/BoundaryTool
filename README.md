@@ -57,8 +57,18 @@ button says how good the answer was — *you are here, to within 40 m*, or *appr
 position only… this is the right district rather than the right field*. It also refuses
 to zoom out past a district view: framing the accuracy circle, which is what a map
 library will do by default, means a vague fix throws away the close-in view you already
-had and shows you half a country. When it fails, the message carries the browser's own
-error code and wording, so a report of it is something anyone can act on.
+had and shows you half a country.
+
+The usual reason a desktop cannot be placed at all is that the **operating system's**
+location service is off, not the browser's — Windows: Settings › Privacy & security ›
+Location; macOS: System Settings › Privacy & Security › Location Services, with the
+browser ticked. Sites that still find you when this one cannot are looking your IP
+address up on their own servers. This tool will not do that: it would be a request
+carrying your address to a third party, and the whole point here is that nothing leaves
+the tab. So when the browser cannot answer, the failure says all of that and hands you
+the **go to coordinates** box instead of leaving you at a dead end. Every message carries
+the browser's own error code and wording, so a report of one is something anyone can
+act on.
 
 Where it still cannot, there is a **go to coordinates** button beside it. Paste a latitude
 and longitude, a `geo:` link, or a URL copied from Google Maps or OpenStreetMap, and the
