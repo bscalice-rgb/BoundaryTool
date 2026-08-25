@@ -20,6 +20,7 @@ import {
   isCoarse,
 } from '../lib/locate';
 import { newFeature, newField } from '../state/ops';
+import { buildHierarchy, hierarchyToText } from '../lib/hierarchy';
 import { poly, squareRing } from './fixtures';
 
 const DICTIONARIES: Record<Lang, Record<string, string>> = { en, pt, es };
@@ -205,5 +206,85 @@ describe('locating', () => {
     expect(describeAccuracy(1_240)).toBe('1.2 km');
     expect(describeAccuracy(32_000)).toBe('32 km');
     expect(describeAccuracy(0)).toBe('—');
+  });
+});
+
+
+describe('the session as a tree', () => {
+  const field = (client: string, farm: string, name: string) =>
+    newField({ client, farm, field: name });
+
+  it('files fields under their farm and their client', () => {
+    const a = field('Acme', 'Home', 'West');
+    const b = field('Acme', 'Home', 'East');
+    const c = field('Acme', 'Ridge', 'Top');
+    const geometry = poly([squareRing(2.5, 48.8, 0.003)]);
+    const workspace = {
+      fields: [a, b, c],
+      features: [a, b, c].map((f) => ({ ...newFeature(geometry, 'x.kml'), fieldId: f.id })),
+    };
+
+    const tree = buildHierarchy(workspace, []);
+    expect(tree.clients).toHaveLength(1);
+    expect(tree.clients[0].name).toBe('Acme');
+    expect(tree.clients[0].fieldCount).toBe(3);
+    expect(tree.clients[0].farms.map((f) => f.name)).toEqual(['Home', 'Ridge']);
+    // Fields read in name order, not the order they happened to be created in.
+    expect(tree.clients[0].farms[0].fields.map((f) => f.name)).toEqual(['East', 'West']);
+  });
+
+  it('puts the unnamed groups last, where they are not in the way', () => {
+    const named = field('Acme', 'Home', 'West');
+    const blank = field('', '', '');
+    const geometry = poly([squareRing(2.5, 48.8, 0.003)]);
+    const tree = buildHierarchy(
+      {
+        fields: [blank, named],
+        features: [blank, named].map((f) => ({
+          ...newFeature(geometry, 'x.kml'),
+          fieldId: f.id,
+        })),
+      },
+      [],
+    );
+    expect(tree.clients.map((c) => c.name)).toEqual(['Acme', '']);
+  });
+
+  it('carries the blocking count up the branches', () => {
+    const a = field('Acme', 'Home', 'West');
+    const geometry = poly([squareRing(2.5, 48.8, 0.003)]);
+    const workspace = {
+      fields: [a],
+      features: [{ ...newFeature(geometry, 'x.kml'), fieldId: a.id }],
+    };
+    const tree = buildHierarchy(workspace, runChecks(workspace, makeTranslator('en')));
+    expect(tree.clients[0].blocking).toBe(0);
+
+    const broken = { ...workspace, fields: [{ ...a, field: '' }] };
+    const brokenTree = buildHierarchy(broken, runChecks(broken, makeTranslator('en')));
+    expect(brokenTree.clients[0].blocking).toBeGreaterThan(0);
+    expect(brokenTree.clients[0].farms[0].blocking).toBeGreaterThan(0);
+  });
+
+  it('counts the polygons that belong to no field at all', () => {
+    const geometry = poly([squareRing(2.5, 48.8, 0.003)]);
+    const tree = buildHierarchy(
+      { fields: [], features: [newFeature(geometry, 'x.kml')] },
+      [],
+    );
+    expect(tree.ungrouped).toBe(1);
+    expect(tree.clients).toEqual([]);
+  });
+
+  it('writes itself out as indented text', () => {
+    const a = field('Acme', 'Home', 'West');
+    const geometry = poly([squareRing(2.5, 48.8, 0.003)]);
+    const tree = buildHierarchy(
+      { fields: [a], features: [{ ...newFeature(geometry, 'x.kml'), fieldId: a.id }] },
+      [],
+    );
+    expect(hierarchyToText(tree, { client: '?', farm: '?', field: '?' })).toBe(
+      'Acme\n  Home\n    West',
+    );
   });
 });

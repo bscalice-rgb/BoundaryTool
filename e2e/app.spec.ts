@@ -1431,3 +1431,61 @@ test.describe('drawing a field', () => {
     await expect(page.getByLabel('Draws into')).toHaveValue('new');
   });
 });
+
+
+test.describe('names CropForce will take', () => {
+  test('folds an accent typed into the table, and says why', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('input[type=file]', FILES);
+    await page.getByRole('button', { name: 'Add to workspace' }).click();
+
+    await attributeCell(page, 'field').first().fill('Caiçara');
+
+    const flag = page.locator('article', { hasText: 'characters CropForce will not take' });
+    await expect(flag).toBeVisible();
+    await expect(flag).toContainText('Caicara');
+
+    await flag.getByRole('button', { name: 'Auto-fix' }).click();
+    await expect(attributeCell(page, 'field').first()).toHaveValue('Caicara');
+    await expect(flag).toBeHidden();
+  });
+
+  test('folds them on the way in, so the preview shows what will land', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('input[type=file]', FILES);
+
+    const dialog = page.getByRole('dialog', { name: 'Import boundaries' });
+    // The join menu offers this file's own values rather than an invented example.
+    await dialog.getByLabel('Field second column').selectOption('Client');
+    await expect(dialog.getByLabel('Field join format')).toContainText('Church Field (Bell Farms)');
+  });
+});
+
+test.describe('the session as a tree', () => {
+  test('files every field under its farm and its client', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('input[type=file]', FILES);
+    await page.getByRole('button', { name: 'Add to workspace' }).click();
+
+    await page.getByRole('button', { name: 'Client / Farm / Field overview' }).click();
+    const tree = page.getByRole('dialog', { name: 'Client / Farm / Field' });
+    await expect(tree).toBeVisible();
+
+    await expect(tree.getByRole('button', { name: /^Bell Farms/ })).toBeVisible();
+    await expect(tree.getByRole('button', { name: /^Manor/ })).toBeVisible();
+    await expect(tree.getByRole('button', { name: /^Church Field/ })).toBeVisible();
+    // Fields nobody named are filed under an empty client, and said to be empty.
+    await expect(tree.getByRole('button', { name: /no client/ })).toBeVisible();
+
+    // Collapsing hides the branches without losing the clients.
+    await tree.getByRole('button', { name: 'Collapse all' }).click();
+    await expect(tree.getByRole('button', { name: /^Church Field/ })).toBeHidden();
+    await expect(tree.getByRole('button', { name: /^Bell Farms/ })).toBeVisible();
+    await tree.getByRole('button', { name: 'Expand all' }).click();
+
+    // Picking a field closes the tree and puts that field in front of both panels.
+    await tree.getByRole('button', { name: /^Church Field/ }).click();
+    await expect(tree).toBeHidden();
+    await expect(page.getByText('Showing 1 selected field')).toBeVisible();
+  });
+});

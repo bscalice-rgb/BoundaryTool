@@ -2,6 +2,7 @@ import buffer from '@turf/buffer';
 import type { BBox } from 'geojson';
 import { ambientT } from '../i18n/translator';
 import type { StringKey, Translator } from '../i18n/translator';
+import { hasNonAscii, nonAsciiCharacters, toAscii } from './text';
 import type {
   FieldId,
   FlagKind,
@@ -227,6 +228,37 @@ export function runChecks(
       featureIds: entry.featureIds,
       fieldIds: [entry.field.id],
       autoFix: { kind: 'shorten-names' },
+      manual: 'attributes',
+    });
+  }
+
+  /*
+   * Characters CropForce will not take. Same class of problem as a name that is too
+   * long: nothing to do with the geometry, everything to do with what the destination
+   * will accept, and silent damage if it goes unnoticed.
+   */
+  for (const entry of fields) {
+    const columns = (['client', 'farm', 'field'] as const).filter((key) =>
+      hasNonAscii(entry.field[key]),
+    );
+    if (columns.length === 0) continue;
+    const characters = [
+      ...new Set(columns.flatMap((key) => nonAsciiCharacters(entry.field[key]))),
+    ];
+    flags.push({
+      id: `nonascii:${entry.field.id}`,
+      kind: 'non-ascii',
+      severity: 'blocking',
+      title: t('flag.nonAscii.title', { field: describeField(entry.field, t) }),
+      detail: t.n('flag.nonAscii.detail', columns.length, {
+        columns: columns.map((key) => t(`fields.${key}` as const)).join(', '),
+        characters: characters.join(' '),
+        example: toAscii(entry.field[columns[0]]),
+      }),
+      guidance: guidanceFor('non-ascii', t),
+      featureIds: entry.featureIds,
+      fieldIds: [entry.field.id],
+      autoFix: { kind: 'asciify-names' },
       manual: 'attributes',
     });
   }
@@ -643,6 +675,45 @@ export function autoShortenNames(
   };
 }
 
+/**
+ * Folds every accented or non-Latin character out of the named fields' attributes.
+ *
+ * Run after shortening rather than before, where both apply: folding can only make a
+ * value shorter or the same length, so it can never push one back over the limit.
+ */
+export function autoAsciiNames(
+  workspace: Workspace,
+  fieldIds: FieldId[],
+  t: Translator = ambientT(),
+): FixOutcome {
+  const target = new Set(fieldIds);
+  let changed = 0;
+
+  const fields = workspace.fields.map((field) => {
+    if (!target.has(field.id)) return field;
+    const next = { ...field };
+    for (const key of ['client', 'farm', 'field'] as const) {
+      if (!hasNonAscii(next[key])) continue;
+      next[key] = toAscii(next[key]);
+      changed++;
+    }
+    return next;
+  });
+
+  if (changed === 0) return { workspace, message: t('fix.alreadyPlain'), ok: false };
+
+  // Folding can turn two names that differed only by an accent into the same name,
+  // which would be a silently dropped boundary on upload.
+  const settled = autoUniquifyNames({ ...workspace, fields }, fields.map((f) => f.id), t);
+  const collisions = settled.ok ? t('fix.shortenedCollided') : '';
+
+  return {
+    workspace: settled.ok ? settled.workspace : { ...workspace, fields },
+    message: t.n('fix.asciified', changed) + collisions,
+    ok: true,
+  };
+}
+
 /* -------------------------------------------------------------------------- */
 /* Reviewed warnings                                                           */
 /* -------------------------------------------------------------------------- */
@@ -671,6 +742,7 @@ export const BLOCKING_KINDS: FlagKind[] = [
   'empty-field',
   'duplicate-name',
   'name-too-long',
+  'non-ascii',
 ];
 
 /** Field ids that cannot be exported, mapped to the reasons why. */

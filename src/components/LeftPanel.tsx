@@ -48,6 +48,7 @@ export interface LeftPanelProps {
   hoverFeatureIds: ReadonlySet<FeatureId>;
   onHoverFeatures: (ids: FeatureId[]) => void;
   onToggleCollapsed: () => void;
+  onOpenHierarchy: () => void;
   onSelectFeature: (id: FeatureId | null, additive: boolean) => void;
   onSelectMany: (ids: FeatureId[]) => void;
   onUpdateField: (id: FieldId, patch: Partial<Omit<WField, 'id'>>) => void;
@@ -205,6 +206,21 @@ export default function LeftPanel(props: LeftPanelProps) {
     <div className="flex h-full min-h-0 flex-col border-r border-ink-800 bg-ink-900">
       <PanelHeader title={t('fields.title')} count={allFields.length}>
         <InfoDot text={t('fields.attributeGuidance')} label={t('fields.attributeLabel')} />
+        <button
+          type="button"
+          onClick={props.onOpenHierarchy}
+          title={t('tree.open')}
+          aria-label={t('tree.open')}
+          className="grid h-5 w-5 shrink-0 place-items-center rounded text-ink-400
+            hover:bg-ink-800 hover:text-ink-100"
+        >
+          <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M3 3h4M3 3v10M3 8h4M3 13h4" strokeLinecap="round" />
+            <rect x="8" y="1.5" width="6" height="3" rx="1" />
+            <rect x="8" y="6.5" width="6" height="3" rx="1" />
+            <rect x="8" y="11.5" width="6" height="3" rx="1" />
+          </svg>
+        </button>
         <Button tone="ghost" onClick={props.onNewField} title={t('fields.newHint')}>
           {t('fields.new')}
         </Button>

@@ -21,6 +21,7 @@ import {
   reprojectorFromDef,
 } from './proj';
 import { ambientT } from '../i18n/translator';
+import { toAscii } from './text';
 import type { StringKey } from '../i18n/translator';
 
 export interface ImportedFeature {
@@ -444,12 +445,30 @@ export type AttributeTarget = 'client' | 'farm' | 'field';
 /** How a second column is joined onto the first. */
 export type JoinFormat = 'parentheses' | 'dash' | 'space' | 'prefix';
 
-export const JOIN_FORMATS: { id: JoinFormat; labelKey: StringKey; example: string }[] = [
-  { id: 'parentheses', labelKey: 'join.parentheses', example: 'Bruno (293)' },
-  { id: 'dash', labelKey: 'join.dash', example: 'Bruno - 293' },
-  { id: 'space', labelKey: 'join.space', example: 'Bruno 293' },
-  { id: 'prefix', labelKey: 'join.prefix', example: '293 - Bruno' },
+export const JOIN_FORMATS: { id: JoinFormat; labelKey: StringKey }[] = [
+  { id: 'parentheses', labelKey: 'join.parentheses' },
+  { id: 'dash', labelKey: 'join.dash' },
+  { id: 'space', labelKey: 'join.space' },
+  { id: 'prefix', labelKey: 'join.prefix' },
 ];
+
+/**
+ * The first pair of values in the batch that actually has something in both columns,
+ * so the format menu can show what each option would do to *this* file rather than to
+ * an invented example.
+ */
+export function joinSample(
+  featuresProps: Record<string, unknown>[],
+  source: AttributeSource,
+): { main: string; extra: string } | null {
+  if (source.column === null || source.extra === null) return null;
+  for (const props of featuresProps) {
+    const main = toAscii(stringify(props[source.column]));
+    const extra = toAscii(stringify(props[source.extra]));
+    if (main !== '' && extra !== '') return { main, extra };
+  }
+  return null;
+}
 
 /**
  * Where one CropForce attribute gets its value.
@@ -570,8 +589,10 @@ export function readSource(
   props: Record<string, unknown>,
   source: AttributeSource,
 ): string {
-  const main = source.column === null ? '' : stringify(props[source.column]);
-  const extra = source.extra === null ? '' : stringify(props[source.extra]);
+  // Folded to ASCII on the way in, because CropForce will not take an accent and the
+  // user should see here, in the preview, exactly what is going to land.
+  const main = source.column === null ? '' : toAscii(stringify(props[source.column]));
+  const extra = source.extra === null ? '' : toAscii(stringify(props[source.extra]));
   return joinValues(main, extra, source.format);
 }
 

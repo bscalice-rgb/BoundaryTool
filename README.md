@@ -83,8 +83,10 @@ call anything.
    the file happens to call them, so a column named `organization` can feed Client. Any
    of the three can be left blank and filled in later. Each can also take a **second
    column** appended to the first, which is how an audit reference survives: a field
-   called Bruno carrying ID 293 arrives as `Bruno (293)`, so the trace back to the
-   source record is not lost the moment the boundary is exported.
+   called Long Acre carrying ID 293 arrives as `Long Acre (293)`, so the trace back to
+   the source record is not lost the moment the boundary is exported. The format menu
+   shows each option applied to the first real pair of values in the file being
+   imported, rather than to an invented example.
 2. **Group into fields.** A *field* is the CropForce unit: one row in the attribute
    table and one MultiPolygon in the export. It can be built from any number of
    polygons, from any number of source files, with holes cut into any of them. What
@@ -183,17 +185,29 @@ row. Features that belong to no field are not exported, and the quality panel sa
 | Two fields overlapping | yes | you pick which field keeps the shared area; it is clipped out of the other |
 | Duplicate `Client`/`Farm`/`Field` | yes | number the surplus apart, or combine them if they are one field |
 | A name longer than 30 characters | yes | trim at a word boundary, then keep the results distinct |
+| Accented or non-Latin characters | yes | rewrite in plain ASCII, then keep the results distinct |
 | Jagged, over-dense boundaries | no | simplify at a suggested tolerance, with preview |
 | Non-crop area likely included | no | none — a heuristic hint, hand-corrected with the hole-cut tool |
 | Slivers below 0.05 ha | no | delete |
 | Season-specific field name | no | none — warning only |
 
-Two of these checks are about the destination rather than the geometry.
+Three of these checks are about the destination rather than the geometry.
 
 Attributes are written as 30-character text columns, so a longer value is cut off when
 the file is written — and two names cut at the same point become one row on upload. The
 length check stops that happening silently; the auto-fix trims at a word boundary where
 there is one close enough to the end to use, and then makes sure nothing has collided.
+
+Accents are the third. CropForce takes plain letters, numbers and basic punctuation, so
+**Améca** has to arrive as *Ameca* and **Caiçara** as *Caicara*. Values read from a file
+are folded on the way in — the import dialog's preview shows the folded form, so what you
+approve is what lands — and the check catches anything typed in afterwards. Most of the
+work is Unicode's: an accented letter decomposes into its base plus a combining mark and
+the mark is dropped; letters that are not accented forms of anything (ß, æ, ø) are spelled
+out by hand. Anything that survives neither — Cyrillic, CJK — is dropped rather than
+guessed at, because no invented transliteration would be recognisable to the grower whose
+field it is. Two names that differed only by an accent become one name once folded, so the
+fix numbers them apart, exactly as the length fix does.
 
 The duplicate check is the second:
 CropForce identifies a field by its Client/Farm/Field combination, so uploading the same
@@ -204,6 +218,18 @@ practice even where they do not today.
 Each check carries a tooltip explaining the boundary criterion behind it — single
 continuous management zone, crop area only, exclusion zones, smoothing, multi-polygon
 fields, no overlaps, consistent naming — so the tool doubles as guidance.
+
+## Seeing the whole session
+
+The field table is flat, because that is the shape editing wants. The tree icon in the
+Fields header opens the same data in the shape CropForce files it: **Client → Farm →
+Field**, with area and blocking counts totalled up each branch. It is how you check that a
+client's whole holding arrived, and that nothing is sitting under a farm that should not
+exist — a typo in a Farm name is invisible in a sorted list of ninety rows and obvious as
+a branch with one field hanging off it. Groups nobody has named yet sort to the bottom and
+say they are empty rather than showing blank. Picking a field closes the tree and puts that
+field in front of both panels; **Copy as text** puts the indented outline on the clipboard
+for a mail or a ticket.
 
 ## Editing tools
 

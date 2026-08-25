@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { PolyGeom, Workspace } from '../types';
 import {
   DEFAULT_THRESHOLDS,
+  autoAsciiNames,
   autoDeleteFeatures,
   autoFixGeometry,
   autoSimplify,
@@ -301,5 +302,51 @@ describe('guidance', () => {
     for (const flag of flags) {
       expect(flag.guidance.length).toBeGreaterThan(20);
     }
+  });
+});
+
+
+describe('characters CropForce will not take', () => {
+  it('blocks a name carrying an accent and folds it on request', () => {
+    const workspace = oneField([bigSquare()], {
+      client: 'Améca',
+      farm: 'Caiçara',
+      field: 'São João',
+    });
+    expect(kindsOf(workspace)).toContain('non-ascii');
+
+    const fixed = autoAsciiNames(workspace, [workspace.fields[0].id]);
+    expect(fixed.ok).toBe(true);
+    expect(fixed.workspace.fields[0]).toMatchObject({
+      client: 'Ameca',
+      farm: 'Caicara',
+      field: 'Sao Joao',
+    });
+    expect(kindsOf(fixed.workspace)).not.toContain('non-ascii');
+  });
+
+  it('leaves a plain name alone', () => {
+    const workspace = oneField([bigSquare()], { client: 'Acme', farm: 'Home', field: 'West' });
+    expect(kindsOf(workspace)).not.toContain('non-ascii');
+    expect(autoAsciiNames(workspace, [workspace.fields[0].id]).ok).toBe(false);
+  });
+
+  // Two names that differed only by an accent become one name once folded, which on
+  // upload is a boundary silently replacing another.
+  it('numbers apart names that collide once the accents are gone', () => {
+    const a = newField({ client: 'Acme', farm: 'Home', field: 'Açai' });
+    const b = newField({ client: 'Acme', farm: 'Home', field: 'Acai' });
+    const workspace = {
+      fields: [a, b],
+      features: [
+        { ...newFeature(bigSquare(), 'a.kml'), fieldId: a.id },
+        { ...newFeature(bigSquare(0.02), 'b.kml'), fieldId: b.id },
+      ],
+    };
+
+    const fixed = autoAsciiNames(workspace, [a.id, b.id]);
+    const names = fixed.workspace.fields.map((field) => field.field);
+    expect(new Set(names).size).toBe(2);
+    expect(names).toContain('Acai');
   });
 });

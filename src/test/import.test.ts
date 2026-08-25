@@ -5,7 +5,9 @@ import {
   collectColumns,
   guessMapping,
   importFiles,
+  joinSample,
   joinValues,
+  readSource,
 } from '../lib/import';
 
 /** Shorthand for a mapping entry that reads one column and nothing else. */
@@ -327,5 +329,38 @@ describe('keeping an audit reference in the field name', () => {
         field: source('name', 'field_id'),
       }).field,
     ).toBe('Bruno');
+  });
+});
+
+
+describe('folding accents on the way in', () => {
+  const source = (column: string | null, extra: string | null = null): AttributeSource => ({
+    column,
+    extra,
+    format: 'parentheses',
+  });
+
+  it('writes accented values the way CropForce will take them', () => {
+    const props = { org: 'Améca', farm: 'Caiçara', name: 'São João' };
+    expect(
+      applyMapping(props, {
+        client: source('org'),
+        farm: source('farm'),
+        field: source('name'),
+      }),
+    ).toEqual({ client: 'Ameca', farm: 'Caicara', field: 'Sao Joao' });
+  });
+
+  it('folds both halves of a joined name', () => {
+    const props = { name: 'Talhão', id: 'Nº 12' };
+    expect(readSource(props, source('name', 'id'))).toBe('Talhao (No 12)');
+  });
+
+  it('shows the format menu what this file would actually produce', () => {
+    const props = [{ name: 'Bruno', id: 293 }];
+    expect(joinSample(props, source('name', 'id'))).toEqual({ main: 'Bruno', extra: '293' });
+    // Nothing to show until both columns are chosen and something is in them.
+    expect(joinSample(props, source('name'))).toBeNull();
+    expect(joinSample([{ name: 'Bruno', id: '' }], source('name', 'id'))).toBeNull();
   });
 });

@@ -33,6 +33,7 @@ import { type ColumnMapping, type ImportReport, importFiles } from './lib/import
 import { areaHa, bboxOf, simplifyMeters, splitByLine, vertexCount } from './lib/geo';
 import { formatLatLon } from './lib/coords';
 import {
+  autoAsciiNames,
   autoDeleteFeatures,
   autoFixGeometry,
   autoShortenNames,
@@ -56,6 +57,7 @@ import { describeAccuracy, isCoarse } from './lib/locate';
 import MapView, { type FocusRequest } from './components/MapView';
 import { CollapsedRail, PanelResizer, SidePanel } from './components/SidePanel';
 import ShortcutSheet from './components/ShortcutSheet';
+import HierarchyDialog from './components/HierarchyDialog';
 import Toolbar, { HistoryButtons, SmoothingPanel } from './components/Toolbar';
 import LeftPanel, { type AttributeFocus } from './components/LeftPanel';
 import QAPanel from './components/QAPanel';
@@ -126,6 +128,7 @@ export default function App() {
   /** Boundaries lit up by pointing rather than selecting. */
   const [hoverFeatureIds, setHoverFeatureIds] = useState<ReadonlySet<FeatureId>>(new Set());
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [hierarchyOpen, setHierarchyOpen] = useState(false);
   /** Panel geometry. Held here for the session; nothing about it is stored. */
   const [fieldsWidth, setFieldsWidth] = useState(460);
   const [checksWidth, setChecksWidth] = useState(340);
@@ -478,6 +481,8 @@ export default function App() {
           return autoUniquifyNames(current, flag.fieldIds, t);
         case 'shorten-names':
           return autoShortenNames(current, flag.fieldIds, t);
+        case 'asciify-names':
+          return autoAsciiNames(current, flag.fieldIds, t);
         default:
           return autoSimplify(current, flag.featureIds, spec.toleranceMeters, t);
       }
@@ -978,6 +983,7 @@ export default function App() {
             hoverFeatureIds={hoverFeatureIds}
             onHoverFeatures={hoverFeatures}
             onToggleCollapsed={() => setFieldsCollapsed(true)}
+            onOpenHierarchy={() => setHierarchyOpen(true)}
           />
         </SidePanel>
         {!fieldsCollapsed && (
@@ -1206,6 +1212,20 @@ export default function App() {
       )}
 
       {shortcutsOpen && <ShortcutSheet onClose={() => setShortcutsOpen(false)} />}
+
+      {hierarchyOpen && (
+        <HierarchyDialog
+          workspace={workspace}
+          flags={flags}
+          onPickField={(fieldId, featureIds) => {
+            setHierarchyOpen(false);
+            focusField(fieldId, false);
+            if (featureIds.length > 0) zoomTo(featureIds);
+          }}
+          onCopied={() => toast(t('tree.copied'))}
+          onClose={() => setHierarchyOpen(false)}
+        />
+      )}
 
       <ToastStack
         toasts={toasts}

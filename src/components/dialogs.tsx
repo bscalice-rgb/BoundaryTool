@@ -10,7 +10,14 @@ import type {
   ImportReport,
   JoinFormat,
 } from '../lib/import';
-import { JOIN_FORMATS, collectColumns, guessMapping, readSource } from '../lib/import';
+import {
+  JOIN_FORMATS,
+  collectColumns,
+  guessMapping,
+  joinSample,
+  joinValues,
+  readSource,
+} from '../lib/import';
 import type { ExportBlockers, ExportPlan } from '../lib/export';
 import { describeField } from '../lib/qa';
 import { Button, Modal } from './ui';
@@ -123,6 +130,12 @@ export function ImportDialog({
                 const preview = previewOf(target);
                 const over = preview.length > 30;
                 const label = t(`fields.${target}` as const);
+                // Each option shows what it would do to this file's own values; an
+                // invented pair of names teaches nothing about the data in hand.
+                const sample = joinSample(
+                  report.features.map((feature) => feature.sourceProps),
+                  source,
+                );
                 return (
                   <div key={target} className="grid grid-cols-[64px_1fr] items-start gap-2">
                     <span className="pt-1.5 text-xs font-medium text-ink-100">{label}</span>
@@ -176,7 +189,9 @@ export function ImportDialog({
                             >
                               {JOIN_FORMATS.map((format) => (
                                 <option key={format.id} value={format.id}>
-                                  {format.example} · {t(format.labelKey)}
+                                  {sample
+                                    ? joinValues(sample.main, sample.extra, format.id)
+                                    : t(format.labelKey)}
                                 </option>
                               ))}
                             </select>
