@@ -53,6 +53,7 @@ export interface LeftPanelProps {
   onSelectMany: (ids: FeatureId[]) => void;
   onUpdateField: (id: FieldId, patch: Partial<Omit<WField, 'id'>>) => void;
   onBulkUpdateFields: (ids: FieldId[], patch: Partial<Omit<WField, 'id'>>) => void;
+  onBulkDeleteFields: (ids: FieldId[]) => void;
   onCombine: () => void;
   onAssign: (fieldId: FieldId | null) => void;
   onUngroupField: (id: FieldId) => void;
@@ -541,6 +542,10 @@ export default function LeftPanel(props: LeftPanelProps) {
         <BulkAttributeBar
           count={checkedIds.length}
           onApply={(patch) => props.onBulkUpdateFields(checkedIds, patch)}
+          onDelete={() => {
+            props.onBulkDeleteFields(checkedIds);
+            setChecked(new Set());
+          }}
           onClear={() => setChecked(new Set())}
         />
       )}
@@ -881,10 +886,12 @@ function FeatureRow({
 function BulkAttributeBar({
   count,
   onApply,
+  onDelete,
   onClear,
 }: {
   count: number;
   onApply: (patch: Partial<Omit<WField, 'id'>>) => void;
+  onDelete: () => void;
   onClear: () => void;
 }) {
   const t = useT();
@@ -909,10 +916,15 @@ function BulkAttributeBar({
           {t.n('bulk.ticked', count)}
         </span>
         <InfoDot label={t('bulk.label')} text={t('bulk.guidance')} />
+        {/* Named for what it removes: the polygon selection has a Delete of its own, and
+            both bars can be on screen at once. */}
+        <Button tone="danger" onClick={onDelete} title={t('bulk.deleteHint')} className="ml-auto">
+          {t('bulk.delete')}
+        </Button>
         <button
           type="button"
           onClick={onClear}
-          className="ml-auto text-[10px] text-ink-400 underline-offset-2 hover:text-crop-300 hover:underline"
+          className="text-[10px] text-ink-400 underline-offset-2 hover:text-crop-300 hover:underline"
         >
           {t('bulk.clear')}
         </button>

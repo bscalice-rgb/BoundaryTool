@@ -22,6 +22,7 @@ import {
   cutExclusionZone,
   deleteFeatures,
   deleteField,
+  deleteFields,
   mergeFeatures,
   replaceWithParts,
   setGeometry,
@@ -448,6 +449,21 @@ export default function App() {
   const ungroupOneField = useCallback(
     (id: FieldId) => apply(t('action.ungroupField'), (current) => ungroupField(current, id)),
     [apply, t],
+  );
+
+  const deleteManyFields = useCallback(
+    (ids: FieldId[]) => {
+      if (ids.length === 0) return;
+      // The same choice the single-row delete offers, asked once for the whole batch.
+      const keepPolygons = !window.confirm(t.n('bulk.deleteConfirm', ids.length));
+      apply(t('action.deleteFields', { count: ids.length }), (current) =>
+        deleteFields(current, ids, !keepPolygons),
+      );
+      setSelection(new Set());
+      setPinnedFields(new Set());
+      toast(t('toast.undoHint', { message: t.n('toast.bulkDeleted', ids.length) }));
+    },
+    [apply, toast, t],
   );
 
   const deleteOneField = useCallback(
@@ -1017,6 +1033,7 @@ export default function App() {
             onSelectFeature={selectOne}
             onSelectMany={selectMany}
             onUpdateField={updateFieldAttrs}
+            onBulkDeleteFields={deleteManyFields}
             onBulkUpdateFields={(ids, patch) => {
               const columns = Object.keys(patch)
                 .map((key) => t(`fields.${key as 'client' | 'farm' | 'field'}` as const))

@@ -151,15 +151,26 @@ export function deleteFeatures(workspace: Workspace, featureIds: FeatureId[]): W
   return dropEmptyAnonymousFields(next, workspace);
 }
 
-/** Removes field rows outright. Their polygons, if any, are released rather than deleted. */
-export function deleteFields(workspace: Workspace, fieldIds: FieldId[]): Workspace {
+/**
+ * Removes field rows. Their polygons are released to the ungrouped pile, or deleted
+ * along with the rows when `deleteMembers` says so.
+ */
+export function deleteFields(
+  workspace: Workspace,
+  fieldIds: FieldId[],
+  deleteMembers = false,
+): Workspace {
   const remove = new Set(fieldIds);
   if (remove.size === 0) return workspace;
+  const doomed = (feature: { fieldId: FieldId | null }) =>
+    feature.fieldId !== null && remove.has(feature.fieldId);
   return {
     fields: workspace.fields.filter((field) => !remove.has(field.id)),
-    features: workspace.features.map((feature) =>
-      feature.fieldId && remove.has(feature.fieldId) ? { ...feature, fieldId: null } : feature,
-    ),
+    features: deleteMembers
+      ? workspace.features.filter((feature) => !doomed(feature))
+      : workspace.features.map((feature) =>
+          doomed(feature) ? { ...feature, fieldId: null } : feature,
+        ),
   };
 }
 
@@ -318,16 +329,11 @@ export function ungroupField(workspace: Workspace, fieldId: FieldId): Workspace 
   };
 }
 
-export function deleteField(
+export const deleteField = (
   workspace: Workspace,
   fieldId: FieldId,
   deleteMembers: boolean,
-): Workspace {
-  const features = deleteMembers
-    ? workspace.features.filter((f) => f.fieldId !== fieldId)
-    : workspace.features.map((f) => (f.fieldId === fieldId ? { ...f, fieldId: null } : f));
-  return { fields: workspace.fields.filter((f) => f.id !== fieldId), features };
-}
+): Workspace => deleteFields(workspace, [fieldId], deleteMembers);
 
 /**
  * A field row with no geometry. Nothing in the interface makes one of these any more —

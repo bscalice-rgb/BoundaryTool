@@ -200,6 +200,14 @@ export const en = {
   'fix.deletedFields.one': 'Deleted 1 empty field.',
   'fix.deletedFields.other': 'Deleted {count} empty fields.',
 
+  'bulk.delete': 'Delete fields',
+  'bulk.deleteHint': 'Delete every ticked field',
+  'bulk.deleteConfirm.one': 'Delete 1 field and its polygons?\n\nOK deletes both. Cancel keeps the polygons and only removes the field row.',
+  'bulk.deleteConfirm.other': 'Delete {count} fields and their polygons?\n\nOK deletes both. Cancel keeps the polygons and only removes the field rows.',
+  'toast.bulkDeleted.one': 'Deleted 1 field.',
+  'toast.bulkDeleted.other': 'Deleted {count} fields.',
+  'action.deleteFields': 'Delete {count} fields',
+
   'fields.title': 'Fields',
   'fields.new': 'Draw field',
   'fields.newHint': 'Draw a boundary on the map; it becomes a new field the moment you close it',

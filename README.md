@@ -108,7 +108,10 @@ call anything.
    Arming the tool while a field is being worked on aims at that field automatically.
 3. **Name in bulk where it helps.** Search the list by client, farm, field or source
    file, tick what you find, and set one Client or Farm name across all of it at once.
-   Field names stay per-row, because each one names a different field.
+   Field names stay per-row, because each one names a different field. The same ticks
+   drive a **Delete fields** button, which asks once for the whole batch whether the
+   polygons go too — named apart from the polygon selection's own Delete, because both
+   bars can be on screen at the same time.
 4. **Work from the report.** The two panels are one workflow rather than two lists
    side by side. The counts in the quality panel are buttons: click "2 blocking" to
    select every polygon behind those flags and frame them on the map, or click a single

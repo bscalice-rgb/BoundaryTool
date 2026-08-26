@@ -1546,3 +1546,49 @@ test.describe('rows that lost their geometry', () => {
     await expect(page.locator('input[aria-label="Field"]')).toHaveCount(4);
   });
 });
+
+
+test.describe('deleting several fields at once', () => {
+  async function loaded(page: Page) {
+    await page.setInputFiles('input[type=file]', FILES);
+    await page.getByRole('button', { name: 'Add to workspace' }).click();
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(4);
+  }
+
+  test('deletes every ticked field and its polygons', async ({ page }) => {
+    await page.goto('/');
+    await loaded(page);
+
+    const ticks = page.locator('input[aria-label^="Select "][aria-label$="for bulk editing"]');
+    await ticks.nth(0).check();
+    await ticks.nth(2).check();
+    await expect(page.getByText('2 fields ticked')).toBeVisible();
+
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.getByRole('button', { name: 'Delete fields' }).click();
+
+    await expect(page.getByText('Deleted 2 fields.')).toBeVisible();
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(2);
+    // Accepting takes the polygons too, so nothing is left ungrouped behind them.
+    await expect(page.getByText('Ungrouped polygons')).toBeHidden();
+
+    await page.keyboard.press('Control+z');
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(4);
+  });
+
+  test('keeps the polygons when the confirmation is declined', async ({ page }) => {
+    await page.goto('/');
+    await loaded(page);
+
+    const ticks = page.locator('input[aria-label^="Select "][aria-label$="for bulk editing"]');
+    await ticks.nth(0).check();
+
+    // Cancel means "remove the row, keep the boundary" — the same bargain the single
+    // row delete offers.
+    page.once('dialog', (dialog) => dialog.dismiss());
+    await page.getByRole('button', { name: 'Delete fields' }).click();
+
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(3);
+    await expect(page.getByText('Ungrouped polygons')).toBeVisible();
+  });
+});

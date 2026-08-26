@@ -208,6 +208,14 @@ export const es: Dictionary = {
   'fix.deletedFields.one': 'Se eliminó 1 lote vacío.',
   'fix.deletedFields.other': 'Se eliminaron {count} lotes vacíos.',
 
+  'bulk.delete': 'Eliminar lotes',
+  'bulk.deleteHint': 'Eliminar todos los lotes tildados',
+  'bulk.deleteConfirm.one': '¿Eliminar 1 lote y sus polígonos?\n\nAceptar elimina ambos. Cancelar conserva los polígonos y solo quita la fila del lote.',
+  'bulk.deleteConfirm.other': '¿Eliminar {count} lotes y sus polígonos?\n\nAceptar elimina ambos. Cancelar conserva los polígonos y solo quita las filas de los lotes.',
+  'toast.bulkDeleted.one': 'Se eliminó 1 lote.',
+  'toast.bulkDeleted.other': 'Se eliminaron {count} lotes.',
+  'action.deleteFields': 'Eliminar {count} lotes',
+
   'fields.title': 'Lotes',
   'fields.new': 'Dibujar lote',
   'fields.newHint': 'Dibuje un contorno en el mapa; se convierte en un lote nuevo apenas lo cierre',

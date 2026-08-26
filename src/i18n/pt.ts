@@ -212,6 +212,14 @@ export const pt: Dictionary = {
   'fix.deletedFields.one': '1 talhão vazio excluído.',
   'fix.deletedFields.other': '{count} talhões vazios excluídos.',
 
+  'bulk.delete': 'Excluir talhões',
+  'bulk.deleteHint': 'Excluir todos os talhões marcados',
+  'bulk.deleteConfirm.one': 'Excluir 1 talhão e seus polígonos?\n\nOK exclui os dois. Cancelar mantém os polígonos e remove apenas a linha do talhão.',
+  'bulk.deleteConfirm.other': 'Excluir {count} talhões e seus polígonos?\n\nOK exclui os dois. Cancelar mantém os polígonos e remove apenas as linhas dos talhões.',
+  'toast.bulkDeleted.one': '1 talhão excluído.',
+  'toast.bulkDeleted.other': '{count} talhões excluídos.',
+  'action.deleteFields': 'Excluir {count} talhões',
+
   'fields.title': 'Talhões',
   'fields.new': 'Desenhar talhão',
   'fields.newHint': 'Desenhe um contorno no mapa; ele vira um novo talhão assim que você fechar',
