@@ -220,6 +220,12 @@ export const pt: Dictionary = {
   'toast.bulkDeleted.other': '{count} talhões excluídos.',
   'action.deleteFields': 'Excluir {count} talhões',
 
+  'filter.issueLabel': 'Problema',
+  'filter.anyIssue': 'Qualquer problema',
+  'filter.issueHint': 'Mostra apenas os talhões com esse tipo de sinalização. O painel de qualidade acompanha, para as duas listas continuarem falando da mesma coisa.',
+  'qa.bulkDelete': 'Excluir {count} talhões',
+  'qa.bulkDeleteHint': 'Excluir os talhões a que esses problemas se referem',
+
   'fields.title': 'Talhões',
   'fields.new': 'Desenhar talhão',
   'fields.newHint': 'Desenhe um contorno no mapa; ele vira um novo talhão assim que você fechar',

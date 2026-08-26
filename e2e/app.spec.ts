@@ -1592,3 +1592,90 @@ test.describe('deleting several fields at once', () => {
     await expect(page.getByText('Ungrouped polygons')).toBeVisible();
   });
 });
+
+
+test.describe('filtering by the problem', () => {
+  async function mixedIssues(page: Page) {
+    await page.setInputFiles('input[type=file]', FILES);
+    await page.getByRole('button', { name: 'Add to workspace' }).click();
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(4);
+    // Three fields miss attributes; this makes a fourth carry a different problem.
+    await attributeCell(page, 'field').first().fill('Wheat 2024');
+  }
+
+  test('narrows the field list to one kind of problem', async ({ page }) => {
+    await page.goto('/');
+    await mixedIssues(page);
+
+    const problem = page.getByLabel('Problem', { exact: true });
+    await expect(problem).toHaveValue('all');
+
+    await problem.selectOption('naming');
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(1);
+    await expect(attributeCell(page, 'field').first()).toHaveValue('Wheat 2024');
+
+    await problem.selectOption('missing-attributes');
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(3);
+  });
+
+  test('is the same filter the quality panel uses', async ({ page }) => {
+    await page.goto('/');
+    await mixedIssues(page);
+
+    // Picked on the right, obeyed on the left.
+    await page.getByRole('button', { name: /^Season names/ }).click();
+    await expect(page.getByLabel('Problem', { exact: true })).toHaveValue('naming');
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(1);
+
+    // And the other way round.
+    await page.getByLabel('Problem', { exact: true }).selectOption('missing-attributes');
+    await expect(page.locator('article')).toHaveCount(3);
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(3);
+  });
+
+  test('lets go when the problem it names is gone', async ({ page }) => {
+    await page.goto('/');
+    await mixedIssues(page);
+
+    await page.getByLabel('Problem', { exact: true }).selectOption('naming');
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(1);
+
+    // Renaming settles the only season-specific name, so the filter has nothing left
+    // to show and steps aside rather than leaving both panels apparently empty.
+    await attributeCell(page, 'field').first().fill('Church Field');
+    await expect(page.getByLabel('Problem', { exact: true })).toHaveValue('all');
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(4);
+  });
+});
+
+test.describe('deleting from the quality panel', () => {
+  test('deletes the fields the picked issues are about', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('input[type=file]', FILES);
+    await page.getByRole('button', { name: 'Add to workspace' }).click();
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(4);
+
+    await page.getByRole('checkbox', { name: 'Select every issue shown' }).check();
+    await expect(page.getByText('3 issues selected')).toBeVisible();
+
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.getByRole('button', { name: 'Delete 3 fields' }).click();
+
+    await expect(page.getByText('Deleted 3 fields.')).toBeVisible();
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(1);
+    await expect(page.getByText('0 blocking')).toBeVisible();
+
+    await page.keyboard.press('Control+z');
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(4);
+  });
+
+  test('offers nothing to delete for an issue about no field', async ({ page }) => {
+    await page.goto('/');
+    await importFixtures(page);
+
+    // Ungrouped polygons are the one flag that belongs to no field row.
+    const flag = page.locator('article', { hasText: 'not assigned to a field' });
+    await flag.getByRole('checkbox', { name: 'Select this issue for a bulk action' }).check();
+    await expect(page.getByRole('button', { name: 'Delete 0 fields' })).toBeDisabled();
+  });
+});

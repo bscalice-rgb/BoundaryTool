@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { FieldId, FlagKind, QAFlag } from '../types';
 import { useT } from '../i18n';
 import type { StringKey } from '../i18n';
@@ -25,6 +25,14 @@ export interface QAPanelProps {
   onClearScope: () => void;
   onAutoFix: (flag: QAFlag) => void;
   onAutoFixMany: (flags: QAFlag[]) => void;
+  /** Deletes the fields a set of issues is about, rows and polygons alike. */
+  onDeleteFields: (fieldIds: FieldId[]) => void;
+  /**
+   * Which kind of problem both panels are looking at. Shared with the field list so
+   * picking "slivers" in either place narrows both.
+   */
+  category: FlagKind | 'all';
+  onCategoryChange: (category: FlagKind | 'all') => void;
   onFixManually: (flag: QAFlag) => void;
   /** Selects the polygons behind these flags and frames them on the map. */
   onSelectFlagged: (flags: QAFlag[]) => void;
@@ -37,7 +45,7 @@ export interface QAPanelProps {
 export default function QAPanel(props: QAPanelProps) {
   const t = useT();
   const [showReviewed, setShowReviewed] = useState(false);
-  const [category, setCategory] = useState<FlagKind | 'all'>('all');
+  const { category, onCategoryChange: setCategory } = props;
   /** Flags ticked for a bulk fix. Held by id, because that is what a flag is known by. */
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
 
@@ -68,13 +76,6 @@ export default function QAPanel(props: QAPanelProps) {
     };
   }, [visible, props.reviewed]);
 
-  // A category that has just been cleared would otherwise leave the panel looking empty.
-  useEffect(() => {
-    if (category !== 'all' && !props.flags.some((flag) => flag.kind === category)) {
-      setCategory('all');
-    }
-  }, [props.flags, category]);
-
   /** Working list, in the order it is drawn, so "select all shown" means what it says. */
   const workingList = useMemo(() => [...blocking, ...warnings], [blocking, warnings]);
 
@@ -85,6 +86,8 @@ export default function QAPanel(props: QAPanelProps) {
   );
   const fixable = pickedFlags.filter((flag) => flag.autoFix);
   const reviewable = pickedFlags.filter((flag) => canReview(flag));
+  // One field can carry several flags, and some flags are about no field at all.
+  const doomedFields = [...new Set(pickedFlags.flatMap((flag) => flag.fieldIds))];
 
   const toggle = (id: string) =>
     setPicked((current) => {
@@ -203,7 +206,7 @@ export default function QAPanel(props: QAPanelProps) {
               label={t(`category.${kind}` as StringKey)}
               count={count}
               active={category === kind}
-              onClick={() => setCategory((current) => (current === kind ? 'all' : kind))}
+              onClick={() => setCategory(category === kind ? 'all' : kind)}
             />
           ))}
         </div>
@@ -350,6 +353,18 @@ export default function QAPanel(props: QAPanelProps) {
               {t('qa.bulkReview', { count: reviewable.length })}
             </Button>
           </div>
+          <Button
+            tone="danger"
+            className="w-full"
+            disabled={doomedFields.length === 0}
+            title={t('qa.bulkDeleteHint')}
+            onClick={() => {
+              props.onDeleteFields(doomedFields);
+              setPicked(new Set());
+            }}
+          >
+            {t('qa.bulkDelete', { count: doomedFields.length })}
+          </Button>
         </div>
       )}
     </div>

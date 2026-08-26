@@ -5,6 +5,7 @@ import type {
   FeatureId,
   FieldId,
   PolyGeom,
+  FlagKind,
   QAFlag,
   Tool,
   WFeature,
@@ -135,6 +136,12 @@ export default function App() {
   const [hoverFeatureIds, setHoverFeatureIds] = useState<ReadonlySet<FeatureId>>(new Set());
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [hierarchyOpen, setHierarchyOpen] = useState(false);
+  /**
+   * Which kind of problem both panels are looking at. Held here rather than in either
+   * one, so picking "slivers" in the field list narrows the quality panel with it and
+   * the two lists never disagree about what is being worked on.
+   */
+  const [category, setCategory] = useState<FlagKind | 'all'>('all');
   /** Panel geometry. Held here for the session; nothing about it is stored. */
   const [fieldsWidth, setFieldsWidth] = useState(460);
   const [checksWidth, setChecksWidth] = useState(340);
@@ -859,6 +866,14 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tool]);
 
+  // A problem filter outlives the problem it names unless it is cleared: both panels
+  // would sit empty, apparently broken, with the reason two clicks away.
+  useEffect(() => {
+    if (category !== 'all' && !flags.some((flag) => flag.kind === category)) {
+      setCategory('all');
+    }
+  }, [flags, category]);
+
   // A target field that has since been deleted would silently become a new field.
   useEffect(() => {
     if (drawTarget !== 'new' && !workspace.fields.some((field) => field.id === drawTarget)) {
@@ -980,6 +995,7 @@ export default function App() {
               setReviewed(new Set());
               setPinnedFields(new Set());
               setExportAttempted(false);
+              setCategory('all');
               setTool('select');
               setFileName('');
               setFileNameEdited(false);
@@ -1061,6 +1077,8 @@ export default function App() {
             onHoverFeatures={hoverFeatures}
             onToggleCollapsed={() => setFieldsCollapsed(true)}
             onOpenHierarchy={() => setHierarchyOpen(true)}
+            category={category}
+            onCategoryChange={setCategory}
           />
         </SidePanel>
         {!fieldsCollapsed && (
@@ -1239,6 +1257,9 @@ export default function App() {
               })
             }
             onExport={openExport}
+            category={category}
+            onCategoryChange={setCategory}
+            onDeleteFields={deleteManyFields}
             onHoverFlag={(flag) => hoverFeatures(flag ? flag.featureIds : [])}
             onToggleCollapsed={() => setChecksCollapsed(true)}
           />

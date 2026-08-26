@@ -208,6 +208,12 @@ export const en = {
   'toast.bulkDeleted.other': 'Deleted {count} fields.',
   'action.deleteFields': 'Delete {count} fields',
 
+  'filter.issueLabel': 'Problem',
+  'filter.anyIssue': 'Any problem',
+  'filter.issueHint': 'Show only fields carrying this kind of flag. The quality panel narrows with it, so the two lists stay about the same thing.',
+  'qa.bulkDelete': 'Delete {count} fields',
+  'qa.bulkDeleteHint': 'Delete the fields these issues are about',
+
   'fields.title': 'Fields',
   'fields.new': 'Draw field',
   'fields.newHint': 'Draw a boundary on the map; it becomes a new field the moment you close it',

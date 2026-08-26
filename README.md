@@ -119,7 +119,11 @@ call anything.
    list — its red badge, or its "select polygons" button — narrows the quality panel to
    that field's issues, and says so with a banner you can clear. The filter row above
    the table uses the same three words as the panel opposite it: **Blocking** and
-   **To review** name the same sets of fields as the two counts there.
+   **To review** name the same sets of fields as the two counts there. Below it, a
+   **Problem** menu narrows the list to one kind of flag — and it is the *same* filter as
+   the quality panel's chips, so picking "slivers" in either place narrows both. When the
+   last flag of that kind is fixed the filter lets go by itself, rather than leaving two
+   empty panels and no clue why.
 5. **Clean and fix.** The quality panel checks each field and offers two routes for
    every flag: an automatic correction, or a manual one that selects the offending
    geometry and arms the right editing tool. Everything, auto-fixes included, is one
@@ -129,7 +133,9 @@ call anything.
    **Auto-fix** or **Mark reviewed** applies to the whole batch. A bulk fix is a single
    history entry, so one Ctrl+Z puts all of it back. Overlaps are the one thing a batch
    will not touch: which field keeps the shared area is a decision, and the run says how
-   many it left for you. A warning you have looked at and are happy with can be
+   many it left for you. Some things are not worth fixing, so the same ticks also carry
+   **Delete N fields**: the fields those issues are about, gone with their polygons, on
+   the same confirmation and the same single undo as the field list's own bulk delete. A warning you have looked at and are happy with can be
    marked reviewed: it drops out of the working list into a collapsed "reviewed" section,
    stops counting against the "To review" filter, and can be put back with **Un-review**.
    Reviewing is a note about what you have read rather than a change to the boundaries,

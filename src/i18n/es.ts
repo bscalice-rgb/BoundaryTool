@@ -216,6 +216,12 @@ export const es: Dictionary = {
   'toast.bulkDeleted.other': 'Se eliminaron {count} lotes.',
   'action.deleteFields': 'Eliminar {count} lotes',
 
+  'filter.issueLabel': 'Problema',
+  'filter.anyIssue': 'Cualquier problema',
+  'filter.issueHint': 'Muestra solo los lotes que llevan ese tipo de marca. El panel de calidad se ajusta junto, para que las dos listas sigan hablando de lo mismo.',
+  'qa.bulkDelete': 'Eliminar {count} lotes',
+  'qa.bulkDeleteHint': 'Eliminar los lotes a los que se refieren estos problemas',
+
   'fields.title': 'Lotes',
   'fields.new': 'Dibujar lote',
   'fields.newHint': 'Dibuje un contorno en el mapa; se convierte en un lote nuevo apenas lo cierre',

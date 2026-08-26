@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { FeatureId, FieldId, QAFlag, WFeature, WField, Workspace } from '../types';
+import type { FeatureId, FieldId, FlagKind, QAFlag, WFeature, WField, Workspace } from '../types';
 import { useT } from '../i18n';
 import type { StringKey } from '../i18n';
 import { areaHa, formatHa } from '../lib/geo';
@@ -49,6 +49,9 @@ export interface LeftPanelProps {
   onHoverFeatures: (ids: FeatureId[]) => void;
   onToggleCollapsed: () => void;
   onOpenHierarchy: () => void;
+  /** Shared with the quality panel, so both lists narrow to the same problem. */
+  category: FlagKind | 'all';
+  onCategoryChange: (category: FlagKind | 'all') => void;
   onSelectFeature: (id: FeatureId | null, additive: boolean) => void;
   onSelectMany: (ids: FeatureId[]) => void;
   onUpdateField: (id: FieldId, patch: Partial<Omit<WField, 'id'>>) => void;
@@ -78,6 +81,28 @@ export default function LeftPanel(props: LeftPanelProps) {
     () => workspace.features.filter((f) => f.fieldId === null),
     [workspace.features],
   );
+
+  /** Which kinds of problem each field carries, for the problem filter. */
+  const kindsByField = useMemo(() => {
+    const map = new Map<FieldId, Set<FlagKind>>();
+    for (const flag of props.flags) {
+      for (const id of flag.fieldIds) {
+        const kinds = map.get(id) ?? new Set<FlagKind>();
+        kinds.add(flag.kind);
+        map.set(id, kinds);
+      }
+    }
+    return map;
+  }, [props.flags]);
+
+  /** The kinds actually present, counted by how many fields carry each. */
+  const categories = useMemo(() => {
+    const counts = new Map<FlagKind, number>();
+    for (const kinds of kindsByField.values()) {
+      for (const kind of kinds) counts.set(kind, (counts.get(kind) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [kindsByField]);
 
   /** How many blocking flags and how many outstanding warnings each field carries. */
   const statusByField = useMemo(() => {
@@ -112,6 +137,9 @@ export default function LeftPanel(props: LeftPanelProps) {
     return terms.every((term) => text.includes(term));
   };
 
+  const matchesCategory = (id: FieldId): boolean =>
+    props.category === 'all' || (kindsByField.get(id)?.has(props.category) ?? false);
+
   const matchesStatus = (id: FieldId): boolean => {
     if (status === 'all') return true;
     const entry = statusByField.get(id) ?? { blocking: 0, review: 0 };
@@ -140,22 +168,24 @@ export default function LeftPanel(props: LeftPanelProps) {
                 .join(' '),
             ),
           )
-      ).filter((entry) => matchesStatus(entry.field.id)),
+      ).filter(
+        (entry) => matchesStatus(entry.field.id) && matchesCategory(entry.field.id),
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allFields, terms, workspace.features, status, statusByField],
+    [allFields, terms, workspace.features, status, statusByField, props.category, kindsByField],
   );
 
   const ungrouped = useMemo(
     () =>
       // A status filter is about fields; ungrouped polygons are not fields yet, so they
       // step aside rather than pretending to have a status.
-      status !== 'all'
+      status !== 'all' || props.category !== 'all'
         ? []
         : terms.length === 0
           ? allUngrouped
           : allUngrouped.filter((f) => matches(f.source)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allUngrouped, terms, status],
+    [allUngrouped, terms, status, props.category],
   );
 
   /** Fields with nothing blocking them, which is what "ready to export" means. */
@@ -165,7 +195,7 @@ export default function LeftPanel(props: LeftPanelProps) {
   );
 
   const hiddenFields = allFields.length - fields.length;
-  const filtering = terms.length > 0 || status !== 'all';
+  const filtering = terms.length > 0 || status !== 'all' || props.category !== 'all';
   const searching = filtering;
 
   const totalHa = fields.reduce((sum, entry) => sum + entry.areaHa, 0);
@@ -363,6 +393,31 @@ export default function LeftPanel(props: LeftPanelProps) {
             );
           })}
         </div>
+
+        {categories.length > 0 && (
+          <label
+            className="mt-1.5 flex items-center gap-1.5 text-[10px] text-ink-400"
+            title={t('filter.issueHint')}
+          >
+            {t('filter.issueLabel')}
+            <select
+              value={props.category}
+              onChange={(event) =>
+                props.onCategoryChange(event.target.value as FlagKind | 'all')
+              }
+              aria-label={t('filter.issueLabel')}
+              className="min-w-0 flex-1 rounded border border-ink-700 bg-ink-950 px-1.5 py-0.5
+                text-[10px] text-ink-100 focus:border-crop-500 focus:outline-none"
+            >
+              <option value="all">{t('filter.anyIssue')}</option>
+              {categories.map(([kind, count]) => (
+                <option key={kind} value={kind}>
+                  {t(`category.${kind}` as StringKey)} ({count})
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
 
         {searching && (
           <p className="mt-1 px-0.5 text-[10px] text-ink-500">
