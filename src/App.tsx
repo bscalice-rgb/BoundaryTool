@@ -34,6 +34,7 @@ import { areaHa, bboxOf, simplifyMeters, splitByLine, vertexCount } from './lib/
 import { formatLatLon } from './lib/coords';
 import {
   autoAsciiNames,
+  autoDeleteFields,
   autoDeleteFeatures,
   autoFixGeometry,
   autoShortenNames,
@@ -96,7 +97,11 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [busy, setBusy] = useState(false);
   const [pendingImport, setPendingImport] = useState<ImportReport | null>(null);
-  const [overlapPair, setOverlapPair] = useState<[WField, WField] | null>(null);
+  const [overlapPair, setOverlapPair] = useState<{
+    fields: [WField, WField];
+    /** A near-identical pair is resolved by deleting one, not by clipping. */
+    duplicate: boolean;
+  } | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   /** Export blockers as of the moment the dialog was opened; null while it is closed. */
   const [exportStatus, setExportStatus] = useState<ExportBlockers | null>(null);
@@ -170,14 +175,20 @@ export default function App() {
     return map;
   }, [workspace.fields]);
 
-  /** What a polygon is called on the map: its field's name, or nothing if ungrouped. */
+  /**
+   * What a polygon is called on the map: its field's name, or nothing if ungrouped.
+   * Built as a lookup rather than a scan — the map asks this once per polygon, so a
+   * `find` over the field list made it quadratic in the size of the workspace.
+   */
+  const fieldNames = useMemo(() => {
+    const names = new Map<FieldId, string>();
+    for (const field of workspace.fields) names.set(field.id, describeField(field, t));
+    return names;
+  }, [workspace.fields, t]);
+
   const labelFor = useCallback(
-    (feature: WFeature) => {
-      if (!feature.fieldId) return '';
-      const field = workspace.fields.find((item) => item.id === feature.fieldId);
-      return field ? describeField(field, t) : '';
-    },
-    [workspace.fields, t],
+    (feature: WFeature) => (feature.fieldId ? (fieldNames.get(feature.fieldId) ?? '') : ''),
+    [fieldNames],
   );
 
   const colorFor = useCallback(
@@ -298,15 +309,23 @@ export default function App() {
     [toast, t],
   );
 
+  /** Source filenames already in the workspace, for spotting a second load of one. */
+  const loadedSources = useMemo(
+    () => new Set(workspace.features.map((feature) => feature.source)),
+    [workspace.features],
+  );
+
   const confirmImport = useCallback(
-    (mapping: ColumnMapping) => {
+    (mapping: ColumnMapping, sources: ReadonlySet<string>) => {
       const report = pendingImport;
       if (!report) return;
       setPendingImport(null);
-      apply(t('action.import', { count: report.features.length }), (current) =>
-        addImported(current, report.features, mapping),
+      const chosen = report.features.filter((feature) => sources.has(feature.source));
+      if (chosen.length === 0) return;
+      apply(t('action.import', { count: chosen.length }), (current) =>
+        addImported(current, chosen, mapping),
       );
-      toast(t.n('import.added', report.features.length));
+      toast(t.n('import.added', chosen.length));
     },
     [pendingImport, apply, toast, t],
   );
@@ -415,6 +434,30 @@ export default function App() {
     [apply, workspace, selectedFeatures, toast, t],
   );
 
+  /*
+   * The field table hands these straight to its rows, which skip re-rendering when
+   * their props are unchanged. Inline arrows here would be a new identity on every
+   * render and every row would redraw for one keystroke in one box.
+   */
+  const updateFieldAttrs = useCallback(
+    (id: FieldId, patch: Partial<Omit<WField, 'id'>>) =>
+      apply(t('action.editAttributes'), (current) => updateField(current, id, patch)),
+    [apply, t],
+  );
+
+  const ungroupOneField = useCallback(
+    (id: FieldId) => apply(t('action.ungroupField'), (current) => ungroupField(current, id)),
+    [apply, t],
+  );
+
+  const deleteOneField = useCallback(
+    (id: FieldId) => {
+      const keepPolygons = !window.confirm(t('fields.deleteFieldConfirm'));
+      apply(t('action.deleteField'), (current) => deleteField(current, id, !keepPolygons));
+    },
+    [apply, t],
+  );
+
   const handleGeometryEdited = useCallback(
     (featureId: FeatureId, geometry: PolyGeom) => {
       apply(t('action.editGeometry'), (current) => setGeometry(current, featureId, geometry));
@@ -483,6 +526,8 @@ export default function App() {
           return autoShortenNames(current, flag.fieldIds, t);
         case 'asciify-names':
           return autoAsciiNames(current, flag.fieldIds, t);
+        case 'delete-fields':
+          return autoDeleteFields(current, flag.fieldIds, t);
         default:
           return autoSimplify(current, flag.featureIds, spec.toleranceMeters, t);
       }
@@ -501,7 +546,10 @@ export default function App() {
           .map((id) => workspace.fields.find((field) => field.id === id))
           .filter((field): field is WField => field !== undefined);
         if (pair.length !== 2) return;
-        setOverlapPair([pair[0], pair[1]]);
+        setOverlapPair({
+          fields: [pair[0], pair[1]],
+          duplicate: flag.kind === 'duplicate-geometry',
+        });
         return;
       }
 
@@ -616,7 +664,26 @@ export default function App() {
 
   const handleResolveOverlap = useCallback(
     (keeperId: string, loserId: string) => {
+      const duplicate = overlapPair?.duplicate ?? false;
       setOverlapPair(null);
+
+      // The same choice, two different answers: neighbours that disagree about an edge
+      // want the shared area clipped; the same field twice wants one of them gone.
+      if (duplicate) {
+        const loser = workspace.fields.find((field) => field.id === loserId);
+        // The copy goes entirely: its row and the polygons under it. Keeping the
+        // polygons would leave the same ground on the map twice, ungrouped.
+        apply(t('action.clipOverlap'), (current) => deleteField(current, loserId, true));
+        toast(
+          t('toast.undoHint', {
+            message: t('fix.duplicateDeleted', {
+              field: loser ? describeField(loser, t) : '',
+            }),
+          }),
+        );
+        return;
+      }
+
       const outcome = resolveOverlap(workspace, keeperId, loserId, t);
       if (!outcome.ok) {
         toast(outcome.message, 'error');
@@ -625,7 +692,7 @@ export default function App() {
       apply(t('action.clipOverlap'), () => outcome.workspace);
       toast(t('toast.undoHint', { message: outcome.message }));
     },
-    [apply, workspace, toast, t],
+    [apply, workspace, overlapPair, toast, t],
   );
 
   /* ------------------------------------------------------------- smoothing */
@@ -949,9 +1016,7 @@ export default function App() {
             onFocusField={focusField}
             onSelectFeature={selectOne}
             onSelectMany={selectMany}
-            onUpdateField={(id, patch) =>
-              apply(t('action.editAttributes'), (current) => updateField(current, id, patch))
-            }
+            onUpdateField={updateFieldAttrs}
             onBulkUpdateFields={(ids, patch) => {
               const columns = Object.keys(patch)
                 .map((key) => t(`fields.${key as 'client' | 'farm' | 'field'}` as const))
@@ -963,13 +1028,8 @@ export default function App() {
             }}
             onCombine={combineSelection}
             onAssign={assignSelection}
-            onUngroupField={(id) =>
-              apply(t('action.ungroupField'), (current) => ungroupField(current, id))
-            }
-            onDeleteField={(id) => {
-              const keepPolygons = !window.confirm(t('fields.deleteFieldConfirm'));
-              apply(t('action.deleteField'), (current) => deleteField(current, id, !keepPolygons));
-            }}
+            onUngroupField={ungroupOneField}
+            onDeleteField={deleteOneField}
             onDeleteSelection={deleteSelection}
             onMergeSelection={mergeSelection}
             onNewField={() => {
@@ -1171,6 +1231,7 @@ export default function App() {
       {pendingImport && (
         <ImportDialog
           report={pendingImport}
+          loadedSources={loadedSources}
           onConfirm={confirmImport}
           onCancel={() => setPendingImport(null)}
         />
@@ -1178,7 +1239,8 @@ export default function App() {
 
       {overlapPair && (
         <OverlapDialog
-          fields={overlapPair}
+          fields={overlapPair.fields}
+          duplicate={overlapPair.duplicate}
           workspace={workspace}
           onResolve={handleResolveOverlap}
           onCancel={() => setOverlapPair(null)}

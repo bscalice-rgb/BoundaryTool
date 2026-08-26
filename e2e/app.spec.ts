@@ -1489,3 +1489,60 @@ test.describe('the session as a tree', () => {
     await expect(page.getByText('Showing 1 selected field')).toBeVisible();
   });
 });
+
+
+test.describe('choosing what to import', () => {
+  test('unticks a file already in the workspace, and adds only what is ticked', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('input[type=file]', FILES);
+    await page.getByRole('button', { name: 'Add to workspace' }).click();
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(4);
+
+    // The same three again: every one is recognised and starts unticked.
+    await page.setInputFiles('input[type=file]', FILES);
+    const dialog = page.getByRole('dialog', { name: 'Import boundaries' });
+    await expect(dialog.getByText('already loaded')).toHaveCount(3);
+    await expect(dialog.getByRole('checkbox', { name: /blocks\.kmz/ })).not.toBeChecked();
+    await expect(page.getByRole('button', { name: 'Add to workspace' })).toBeDisabled();
+
+    // Ticking just one adds just that one.
+    await dialog.getByRole('checkbox', { name: /extra\.geojson/ }).check();
+    await page.getByRole('button', { name: 'Add to workspace' }).click();
+    await expect(page.getByText('Added 1 polygon to the workspace.')).toBeVisible();
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(5);
+  });
+
+  test('shows the source table so the right column can be picked', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('input[type=file]', FILES);
+
+    const dialog = page.getByRole('dialog', { name: 'Import boundaries' });
+    const preview = dialog.locator('table');
+    await expect(preview).toBeVisible();
+    // Column names as headers, values underneath, so an unhelpful name is not the only
+    // thing to go on.
+    await expect(preview.getByRole('columnheader', { name: 'Farm' })).toBeVisible();
+    await expect(preview.getByRole('cell', { name: 'Church Field' })).toBeVisible();
+    await expect(preview.getByRole('cell', { name: 'Bell Farms' })).toBeVisible();
+  });
+});
+
+test.describe('rows that lost their geometry', () => {
+  test('takes the field away with its last polygon', async ({ page }) => {
+    await page.goto('/');
+    await page.setInputFiles('input[type=file]', FILES);
+    await page.getByRole('button', { name: 'Add to workspace' }).click();
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(4);
+
+    await page.locator('tbody tr').first().hover();
+    await page.getByRole('button', { name: "Select this field's polygons" }).first().click();
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+
+    // The row goes with the boundary rather than being left behind as an empty field.
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(3);
+    await expect(page.locator('article', { hasText: 'no polygons assigned' })).toHaveCount(0);
+
+    await page.keyboard.press('Control+z');
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(4);
+  });
+});

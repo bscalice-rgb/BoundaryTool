@@ -174,6 +174,16 @@ export default function MapView(props: MapViewProps) {
   /** Geometry object each layer was drawn from, so only real changes force a redraw. */
   const drawnFromRef = useRef(new Map<FeatureId, PolyGeom>());
   /**
+   * The style and the tooltip text last written to each layer.
+   *
+   * Every keystroke in the attribute table produces a new workspace object, which runs
+   * these effects again. Without a record of what is already on screen they would rewrite
+   * the style of every polygon and rebuild every tooltip for a change to one name — which
+   * is most of a frame's work, done for nothing, several times a second.
+   */
+  const styledRef = useRef(new Map<FeatureId, string>());
+  const labelledRef = useRef(new Map<FeatureId, string>());
+  /**
    * Features whose latest geometry came out of the layer itself. Rebuilding those
    * would tear down the Geoman editing session the user is in the middle of.
    */
@@ -398,6 +408,19 @@ export default function MapView(props: MapViewProps) {
     const drawnFrom = drawnFromRef.current;
     const live = new Set<FeatureId>();
 
+    /** Writes a style only where it would differ from what the layer already carries. */
+    const restyle = (
+      layer: L.Polygon,
+      feature: WFeature,
+      selected: boolean,
+      color: string,
+    ) => {
+      const signature = `${selected ? 1 : 0}|${color}|${feature.fieldId ? 1 : 0}`;
+      if (styledRef.current.get(feature.id) === signature) return;
+      styledRef.current.set(feature.id, signature);
+      applyStyle(layer, feature, selected, color);
+    };
+
     for (const feature of props.workspace.features) {
       live.add(feature.id);
       const existing = layers.get(feature.id);
@@ -407,12 +430,12 @@ export default function MapView(props: MapViewProps) {
         // The change came from this very layer; keep the editing session alive.
         selfEditedRef.current.delete(feature.id);
         drawnFrom.set(feature.id, feature.geometry);
-        applyStyle(existing, feature, props.selection.has(feature.id), props.colorFor(feature));
+        restyle(existing, feature, props.selection.has(feature.id), props.colorFor(feature));
         continue;
       }
 
       if (existing && !geometryChanged) {
-        applyStyle(existing, feature, props.selection.has(feature.id), props.colorFor(feature));
+        restyle(existing, feature, props.selection.has(feature.id), props.colorFor(feature));
         continue;
       }
 
@@ -463,7 +486,9 @@ export default function MapView(props: MapViewProps) {
       layer.addTo(map);
       layers.set(feature.id, layer);
       drawnFrom.set(feature.id, feature.geometry);
-      applyStyle(layer, feature, props.selection.has(feature.id), props.colorFor(feature));
+      styledRef.current.delete(feature.id);
+      labelledRef.current.delete(feature.id);
+      restyle(layer, feature, props.selection.has(feature.id), props.colorFor(feature));
     }
 
     for (const [id, layer] of layers) {
@@ -471,6 +496,8 @@ export default function MapView(props: MapViewProps) {
       layer.remove();
       layers.delete(id);
       drawnFrom.delete(id);
+      styledRef.current.delete(id);
+      labelledRef.current.delete(id);
     }
 
     // First data to arrive frames itself; later imports leave the view alone so the
@@ -577,21 +604,21 @@ export default function MapView(props: MapViewProps) {
         if (!layer) continue;
         const area = `${formatHa(areaHa(feature.geometry))} ha`;
         const label = propsRef.current.labelFor(feature);
+        const permanent = show && label !== '';
+        const text = permanent ? `${label} - ${area}` : area;
+        const signature = `${permanent ? 1 : 0}|${text}`;
+        // Rebuilding a tooltip means new DOM; doing it for every polygon on every
+        // keystroke is what made a large workspace feel slow.
+        if (labelledRef.current.get(feature.id) === signature) continue;
+        labelledRef.current.set(feature.id, signature);
+
         layer.unbindTooltip();
-        if (show && label !== '') {
-          layer.bindTooltip(`${label} · ${area}`, {
-            permanent: true,
-            direction: 'center',
-            className: 'field-label',
-            opacity: 1,
-          });
-        } else {
-          layer.bindTooltip(area, {
-            className: 'measure-tooltip',
-            sticky: true,
-            direction: 'top',
-          });
-        }
+        layer.bindTooltip(
+          text,
+          permanent
+            ? { permanent: true, direction: 'center', className: 'field-label', opacity: 1 }
+            : { className: 'measure-tooltip', sticky: true, direction: 'top' },
+        );
       }
     };
 

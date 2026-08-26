@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { FeatureId, FieldId, QAFlag, WField, Workspace } from '../types';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { FeatureId, FieldId, QAFlag, WFeature, WField, Workspace } from '../types';
 import { useT } from '../i18n';
 import type { StringKey } from '../i18n';
 import { areaHa, formatHa } from '../lib/geo';
@@ -180,13 +180,31 @@ export default function LeftPanel(props: LeftPanelProps) {
     [checked, liveFieldIds],
   );
 
-  const toggleChecked = (id: FieldId) =>
-    setChecked((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  const toggleChecked = useCallback(
+    (id: FieldId) =>
+      setChecked((current) => {
+        const next = new Set(current);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      }),
+    [],
+  );
+
+  /** Members per field, rebuilt only when the polygons themselves change. */
+  const membersByField = useMemo(() => {
+    const map = new Map<FieldId, WFeature[]>();
+    for (const feature of workspace.features) {
+      if (!feature.fieldId) continue;
+      const list = map.get(feature.fieldId) ?? [];
+      list.push(feature);
+      map.set(feature.fieldId, list);
+    }
+    return map;
+  }, [workspace.features]);
+
+  const EMPTY_MEMBERS: WFeature[] = useMemo(() => [], []);
+  const membersOf = (id: FieldId): WFeature[] => membersByField.get(id) ?? EMPTY_MEMBERS;
 
   // A field is expanded automatically when the QA panel sends focus to one of its cells.
   useEffect(() => {
@@ -194,13 +212,42 @@ export default function LeftPanel(props: LeftPanelProps) {
     setExpanded((current) => new Set(current).add(props.attributeFocus!.fieldId));
   }, [props.attributeFocus]);
 
-  const toggleExpanded = (id: FieldId) =>
-    setExpanded((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  const toggleExpanded = useCallback(
+    (id: FieldId) =>
+      setExpanded((current) => {
+        const next = new Set(current);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      }),
+    [],
+  );
+
+  /*
+   * Every handler a row is given is stable, so a row can skip re-rendering when nothing
+   * about it changed. With a few hundred fields, re-rendering all of them for one
+   * keystroke in one name box was most of the cost of typing.
+   */
+  const { onUpdateField, onSelectMany, onZoomToFeatures, onUngroupField, onDeleteField } = props;
+  const updateRow = useCallback(
+    (id: FieldId, patch: Partial<Omit<WField, 'id'>>) => onUpdateField(id, patch),
+    [onUpdateField],
+  );
+  const selectMembers = useCallback(
+    (_id: FieldId, memberIds: FeatureId[]) => onSelectMany(memberIds),
+    [onSelectMany],
+  );
+  const zoomMembers = useCallback(
+    (_id: FieldId, memberIds: FeatureId[]) => onZoomToFeatures(memberIds),
+    [onZoomToFeatures],
+  );
+  const zoomOne = useCallback((id: FeatureId) => onZoomToFeatures([id]), [onZoomToFeatures]);
+  const ungroupRow = useCallback((id: FieldId) => onUngroupField(id), [onUngroupField]);
+  const deleteRow = useCallback((id: FieldId) => onDeleteField(id), [onDeleteField]);
+  const focusRow = useCallback(
+    (id: FieldId, additive: boolean) => props.onFocusField(id, additive),
+    [props],
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col border-r border-ink-800 bg-ink-900">
@@ -407,31 +454,31 @@ export default function LeftPanel(props: LeftPanelProps) {
                     color={fieldColor(index)}
                     areaHa={entry.areaHa}
                     memberIds={entry.featureIds}
+                    members={membersOf(entry.field.id)}
                     memberSelected={memberSelected}
                     scoped={props.scopeFieldIds.has(entry.field.id)}
-                    onFocus={(additive) => props.onFocusField(entry.field.id, additive)}
+                    onFocus={focusRow}
                     showBlocked={props.showBlocked}
                     hovered={entry.featureIds.some((id) => props.hoverFeatureIds.has(id))}
                     onHover={props.onHoverFeatures}
                     blockingCount={blocking}
                     expanded={expanded.has(entry.field.id)}
                     checked={checked.has(entry.field.id)}
-                    onCheck={() => toggleChecked(entry.field.id)}
+                    onCheck={toggleChecked}
                     focus={
                       props.attributeFocus?.fieldId === entry.field.id
                         ? props.attributeFocus
                         : null
                     }
-                    workspace={workspace}
                     selection={selection}
-                    onToggle={() => toggleExpanded(entry.field.id)}
-                    onUpdate={(patch) => props.onUpdateField(entry.field.id, patch)}
-                    onSelectMembers={() => props.onSelectMany(entry.featureIds)}
-                    onZoom={() => props.onZoomToFeatures(entry.featureIds)}
-                    onUngroup={() => props.onUngroupField(entry.field.id)}
-                    onDelete={() => props.onDeleteField(entry.field.id)}
+                    onToggle={toggleExpanded}
+                    onUpdate={updateRow}
+                    onSelectMembers={selectMembers}
+                    onZoom={zoomMembers}
+                    onUngroup={ungroupRow}
+                    onDelete={deleteRow}
                     onSelectFeature={props.onSelectFeature}
-                    onZoomFeature={(id) => props.onZoomToFeatures([id])}
+                    onZoomFeature={zoomOne}
                   />
                 );
               })}
@@ -558,10 +605,11 @@ interface FieldRowProps {
   color: string;
   areaHa: number;
   memberIds: FeatureId[];
+  members: WFeature[];
   memberSelected: boolean;
   /** True while the quality panel is scoped to this field. */
   scoped: boolean;
-  onFocus: (additive: boolean) => void;
+  onFocus: (id: FieldId, additive: boolean) => void;
   /** Red attribute cells, once an export attempt has been stopped by them. */
   showBlocked: boolean;
   hovered: boolean;
@@ -570,24 +618,23 @@ interface FieldRowProps {
   expanded: boolean;
   /** Ticked for bulk attribute editing. Independent of the polygon selection. */
   checked: boolean;
-  onCheck: () => void;
+  onCheck: (id: FieldId) => void;
   focus: AttributeFocus | null;
-  workspace: Workspace;
   selection: ReadonlySet<FeatureId>;
-  onToggle: () => void;
-  onUpdate: (patch: Partial<Omit<WField, 'id'>>) => void;
-  onSelectMembers: () => void;
-  onZoom: () => void;
-  onUngroup: () => void;
-  onDelete: () => void;
+  onToggle: (id: FieldId) => void;
+  onUpdate: (id: FieldId, patch: Partial<Omit<WField, 'id'>>) => void;
+  onSelectMembers: (id: FieldId, memberIds: FeatureId[]) => void;
+  onZoom: (id: FieldId, memberIds: FeatureId[]) => void;
+  onUngroup: (id: FieldId) => void;
+  onDelete: (id: FieldId) => void;
   onSelectFeature: (id: FeatureId, additive: boolean) => void;
   onZoomFeature: (id: FeatureId) => void;
 }
 
-function FieldRow(props: FieldRowProps) {
+const FieldRow = memo(function FieldRow(props: FieldRowProps) {
   const t = useT();
   const { field } = props;
-  const members = props.workspace.features.filter((f) => props.memberIds.includes(f.id));
+  const members = props.members;
 
   return (
     <>
@@ -604,14 +651,14 @@ function FieldRow(props: FieldRowProps) {
             type="checkbox"
             className="h-3 w-3 accent-crop-500 align-middle"
             checked={props.checked}
-            onChange={props.onCheck}
+            onChange={() => props.onCheck(field.id)}
             aria-label={t('fields.selectForBulk', { name: describeField(field, t) })}
           />
         </td>
         <td className="py-0.5">
           <button
             type="button"
-            onClick={props.onToggle}
+            onClick={() => props.onToggle(field.id)}
             title={t.n('fields.polygonCount', props.memberIds.length)}
             className="flex items-center gap-1 text-ink-400 hover:text-ink-100"
           >
@@ -630,28 +677,28 @@ function FieldRow(props: FieldRowProps) {
           column="client"
           focus={props.focus}
           showBlocked={props.showBlocked}
-          onChange={(client) => props.onUpdate({ client })}
+          onChange={(client) => props.onUpdate(field.id, { client })}
         />
         <AttributeCell
           value={field.farm}
           column="farm"
           focus={props.focus}
           showBlocked={props.showBlocked}
-          onChange={(farm) => props.onUpdate({ farm })}
+          onChange={(farm) => props.onUpdate(field.id, { farm })}
         />
         <AttributeCell
           value={field.field}
           column="field"
           focus={props.focus}
           showBlocked={props.showBlocked}
-          onChange={(value) => props.onUpdate({ field: value })}
+          onChange={(value) => props.onUpdate(field.id, { field: value })}
         />
         <td className="pr-1.5">
           <div className="flex items-center justify-end gap-0.5">
             {props.blockingCount > 0 && (
               <button
                 type="button"
-                onClick={(event) => props.onFocus(event.shiftKey)}
+                onClick={(event) => props.onFocus(field.id, event.shiftKey)}
                 title={t.n('fields.blockingBadge', props.blockingCount)}
                 aria-label={t('fields.showIssues', { name: describeField(field, t) })}
                 className="mr-0.5 grid h-4 w-4 place-items-center rounded-full bg-red-500/20
@@ -660,10 +707,16 @@ function FieldRow(props: FieldRowProps) {
                 {props.blockingCount}
               </button>
             )}
-            <IconButton title={t('fields.selectMembers')} onClick={props.onSelectMembers}>
+            <IconButton
+              title={t('fields.selectMembers')}
+              onClick={() => props.onSelectMembers(field.id, props.memberIds)}
+            >
               <path d="M2 2h4M2 2v4M14 2h-4M14 2v4M2 14h4M2 14v-4M14 14h-4M14 14v-4" />
             </IconButton>
-            <IconButton title={t('fields.zoomToField')} onClick={props.onZoom}>
+            <IconButton
+              title={t('fields.zoomToField')}
+              onClick={() => props.onZoom(field.id, props.memberIds)}
+            >
               <circle cx="7" cy="7" r="4.5" />
               <path d="M10.5 10.5L14 14" />
             </IconButton>
@@ -698,10 +751,18 @@ function FieldRow(props: FieldRowProps) {
               ))}
             </ul>
             <div className="flex gap-1.5">
-              <Button tone="ghost" onClick={props.onUngroup} title={t('fields.ungroupHint')}>
+              <Button
+                tone="ghost"
+                onClick={() => props.onUngroup(field.id)}
+                title={t('fields.ungroupHint')}
+              >
                 {t('fields.ungroup')}
               </Button>
-              <Button tone="ghost" onClick={props.onDelete} title={t('fields.deleteFieldHint')}>
+              <Button
+                tone="ghost"
+                onClick={() => props.onDelete(field.id)}
+                title={t('fields.deleteFieldHint')}
+              >
                 {t('fields.deleteField')}
               </Button>
             </div>
@@ -710,7 +771,7 @@ function FieldRow(props: FieldRowProps) {
       )}
     </>
   );
-}
+});
 
 /* -------------------------------------------------------------------------- */
 /* Attribute cell                                                              */

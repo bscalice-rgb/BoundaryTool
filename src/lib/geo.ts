@@ -24,7 +24,21 @@ export const feat = (geometry: PolyGeom): PolyFeature => ({
   geometry,
 });
 
-export const areaM2 = (geometry: PolyGeom): number => area(feat(geometry));
+/**
+ * Areas are asked for constantly — the table, the map tooltips, the checks, the export
+ * plan — and geometries are immutable, so the answer is kept against the object itself.
+ * With a few hundred polygons this is the difference between a responsive table and a
+ * sticky one.
+ */
+const areaCache = new WeakMap<object, number>();
+
+export const areaM2 = (geometry: PolyGeom): number => {
+  const cached = areaCache.get(geometry);
+  if (cached !== undefined) return cached;
+  const value = area(feat(geometry));
+  areaCache.set(geometry, value);
+  return value;
+};
 
 export const areaHa = (geometry: PolyGeom): number => areaM2(geometry) / 10_000;
 
@@ -37,17 +51,31 @@ let numberLocales: string[] = ['en-GB'];
 
 export const setNumberLocale = (locales: string[]): void => {
   numberLocales = locales;
+  formatters.clear();
 };
 
-export const formatHa = (ha: number): string =>
-  ha.toLocaleString(numberLocales, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/**
+ * `Number.toLocaleString` builds a formatter on every call. Areas are formatted for
+ * every row, every map tooltip and every flag, several times a second while someone
+ * types, so the formatters are made once and kept.
+ */
+const formatters = new Map<number, Intl.NumberFormat>();
 
-/** A plain number in the current locale, for readouts that are not areas. */
-export const formatNum = (value: number, digits = 0): string =>
-  value.toLocaleString(numberLocales, {
+const formatterFor = (digits: number): Intl.NumberFormat => {
+  const existing = formatters.get(digits);
+  if (existing) return existing;
+  const made = new Intl.NumberFormat(numberLocales, {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   });
+  formatters.set(digits, made);
+  return made;
+};
+
+export const formatHa = (ha: number): string => formatterFor(2).format(ha);
+
+/** A plain number in the current locale, for readouts that are not areas. */
+export const formatNum = (value: number, digits = 0): string => formatterFor(digits).format(value);
 
 export const bboxOf = (geometry: PolyGeom): BBox => bbox(feat(geometry));
 

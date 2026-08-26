@@ -78,7 +78,12 @@ call anything.
 
 ## How it works
 
-1. **Drop files.** Anything not already in WGS84 is reprojected on import. You then say
+1. **Drop files.** Anything not already in WGS84 is reprojected on import. Before
+   anything is added you get the list of files with a tick each — a file whose name is
+   already in the workspace starts **unticked**, because loading the same one twice is
+   how a boundary usually ends up in the export in duplicate — and the first few rows of
+   the source table, so a column called `f_2` or `NOME` can be identified by what is in
+   it rather than by its name. You then say
    which source column holds the Client, which the Farm and which the Field — whatever
    the file happens to call them, so a column named `organization` can feed Client. Any
    of the three can be left blank and filled in later. Each can also take a **second
@@ -180,9 +185,10 @@ row. Features that belong to no field are not exported, and the quality panel sa
 | Check | Blocks export | Auto-fix |
 |---|---|---|
 | Missing `Client` / `Farm` / `Field` | yes | none — jumps to the empty cell |
-| Field with no polygons assigned | yes | none |
+| Field with no polygons assigned | yes | delete the row — and several at once from the panel |
 | Self-intersecting or invalid geometry | yes | un-kink and re-merge the outline |
 | Two fields overlapping | yes | you pick which field keeps the shared area; it is clipped out of the other |
+| The same boundary twice | yes | you pick which to keep; the other field and its polygons go |
 | Duplicate `Client`/`Farm`/`Field` | yes | number the surplus apart, or combine them if they are one field |
 | A name longer than 30 characters | yes | trim at a word boundary, then keep the results distinct |
 | Accented or non-Latin characters | yes | rewrite in plain ASCII, then keep the results distinct |
@@ -209,7 +215,14 @@ guessed at, because no invented transliteration would be recognisable to the gro
 field it is. Two names that differed only by an accent become one name once folded, so the
 fix numbers them apart, exactly as the length fix does.
 
-The duplicate check is the second:
+There is a second kind of duplicate, about the geometry rather than the name: two fields
+covering the same ground. Any shared area at all is an overlap, but once two fields share
+90% or more of the smaller one they are almost certainly one field imported twice — the
+same file loaded again, or the same block present in two of them. Clipping the shared area
+out of one would leave a sliver rather than fix anything, so that pair gets its own flag
+and its own fix: pick the one to keep, and the other field goes with its polygons.
+
+The name duplicate check is the second:
 CropForce identifies a field by its Client/Farm/Field combination, so uploading the same
 combination twice replaces the first with the second and a boundary disappears without
 warning. Case and extra spacing are treated as the same name, because they collide in
@@ -218,6 +231,19 @@ practice even where they do not today.
 Each check carries a tooltip explaining the boundary criterion behind it — single
 continuous management zone, crop area only, exclusion zones, smoothing, multi-polygon
 fields, no overlaps, consistent naming — so the tool doubles as guidance.
+
+## Speed
+
+Typing in the attribute table with a few hundred polygons loaded used to block for about
+29 ms a keystroke, which is enough to feel sticky. It is now about 12 ms. The work was
+not where it looked: profiling found the season-name check compiling thirty regular
+expressions per field per pass, the map's label pass rebuilding every tooltip because it
+looked field names up with a linear scan per polygon, and the whole field table
+re-rendering for one edit. So the crop words became one compiled alternation, names and
+areas are looked up rather than searched, tooltips and polygon styles are only rewritten
+where the text or style actually changed, and each table row skips re-rendering when
+nothing about it moved. There is a benchmark in the repository history if the numbers
+need checking again.
 
 ## Seeing the whole session
 

@@ -28,21 +28,40 @@ import { Button, Modal } from './ui';
 
 export function ImportDialog({
   report,
+  loadedSources,
   onConfirm,
   onCancel,
 }: {
   report: ImportReport;
-  onConfirm: (mapping: ColumnMapping) => void;
+  /** Files already in the workspace, so a second load can be spotted before it happens. */
+  loadedSources: ReadonlySet<string>;
+  onConfirm: (mapping: ColumnMapping, sources: ReadonlySet<string>) => void;
   onCancel: () => void;
 }) {
   const t = useT();
-  const columns = useMemo(
-    () => collectColumns(report.features.map((f) => f.sourceProps)),
+  const sources = useMemo(
+    () => [...new Set(report.features.map((f) => f.source))],
     [report.features],
   );
-  const [mapping, setMapping] = useState<ColumnMapping>(() => guessMapping(columns));
 
-  const sources = [...new Set(report.features.map((f) => f.source))];
+  // A file whose name is already in the workspace starts unticked: loading the same one
+  // twice is the usual way a boundary ends up in the export in duplicate.
+  const [chosen, setChosen] = useState<ReadonlySet<string>>(
+    () => new Set(sources.filter((source) => !loadedSources.has(source))),
+  );
+
+  const features = useMemo(
+    () => report.features.filter((feature) => chosen.has(feature.source)),
+    [report.features, chosen],
+  );
+
+  const columns = useMemo(
+    () => collectColumns(features.map((f) => f.sourceProps)),
+    [features],
+  );
+  const [mapping, setMapping] = useState<ColumnMapping>(() =>
+    guessMapping(collectColumns(report.features.map((f) => f.sourceProps))),
+  );
 
   const choose = (target: AttributeTarget, key: string | null) =>
     setMapping((current) => {
@@ -61,7 +80,7 @@ export function ImportDialog({
 
   /** What the first feature carrying anything would end up called. */
   const previewOf = (target: AttributeTarget): string => {
-    for (const feature of report.features) {
+    for (const feature of features) {
       const value = readSource(feature.sourceProps, mapping[target]);
       if (value !== '') return value;
     }
@@ -76,17 +95,48 @@ export function ImportDialog({
         })}
       </p>
 
-      <ul className="mt-2 space-y-0.5">
-        {sources.map((source) => (
-          <li key={source} className="flex items-center gap-2 text-[11px] text-ink-400">
-            <span className="h-1 w-1 rounded-full bg-ink-600" />
-            <span className="truncate">{source}</span>
-            <span className="ml-auto tabular-nums">
-              {report.features.filter((f) => f.source === source).length}
-            </span>
-          </li>
-        ))}
-      </ul>
+      <fieldset className="mt-3">
+        <legend className="text-[11px] font-semibold text-ink-100">
+          {t('import.chooseFiles')}
+        </legend>
+        <p className="mt-1 text-[11px] leading-relaxed text-ink-400">{t('import.chooseHelp')}</p>
+        <ul className="mt-2 space-y-0.5">
+          {sources.map((source) => {
+            const already = loadedSources.has(source);
+            return (
+              <li key={source}>
+                <label className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5
+                  text-[11px] text-ink-300 hover:bg-ink-850">
+                  <input
+                    type="checkbox"
+                    className="h-3 w-3 shrink-0 accent-crop-500"
+                    aria-label={t('import.selectFile', { file: source })}
+                    checked={chosen.has(source)}
+                    onChange={(event) =>
+                      setChosen((current) => {
+                        const next = new Set(current);
+                        if (event.target.checked) next.add(source);
+                        else next.delete(source);
+                        return next;
+                      })
+                    }
+                  />
+                  <span className="min-w-0 truncate">{source}</span>
+                  {already && (
+                    <span className="shrink-0 rounded bg-amber-500/20 px-1.5 text-[10px]
+                      text-amber-200">
+                      {t('import.alreadyLoaded')}
+                    </span>
+                  )}
+                  <span className="ml-auto shrink-0 tabular-nums text-ink-400">
+                    {report.features.filter((f) => f.source === source).length}
+                  </span>
+                </label>
+              </li>
+            );
+          })}
+        </ul>
+      </fieldset>
 
       {report.notes.length > 0 && (
         <div className="mt-3 rounded-md border border-ink-700 bg-ink-950/60 p-2.5">
@@ -114,7 +164,11 @@ export function ImportDialog({
         </div>
       )}
 
-      {report.features.length > 0 && (
+      {features.length > 0 && columns.length > 0 && (
+        <AttributePreview features={features} mapping={mapping} />
+      )}
+
+      {features.length > 0 && (
         <fieldset className="mt-4">
           <legend className="text-[11px] font-semibold text-ink-100">
             {t('import.mappingTitle')}
@@ -133,7 +187,7 @@ export function ImportDialog({
                 // Each option shows what it would do to this file's own values; an
                 // invented pair of names teaches nothing about the data in hand.
                 const sample = joinSample(
-                  report.features.map((feature) => feature.sourceProps),
+                  features.map((feature) => feature.sourceProps),
                   source,
                 );
                 return (
@@ -150,7 +204,7 @@ export function ImportDialog({
                         <option value="">{t('import.leaveBlank')}</option>
                         {columns.map((column) => (
                           <option key={column.key} value={column.key}>
-                            {column.key} ({column.filled}/{report.features.length})
+                            {column.key} ({column.filled}/{features.length})
                           </option>
                         ))}
                       </select>
@@ -219,12 +273,13 @@ export function ImportDialog({
       )}
 
       <div className="mt-4 flex justify-end gap-2">
+        {chosen.size === 0 && report.features.length > 0 && (
+          <span className="mr-auto self-center text-[11px] text-amber-300">
+            {t('import.noneChosen')}
+          </span>
+        )}
         <Button onClick={onCancel}>{t('import.cancel')}</Button>
-        <Button
-          tone="primary"
-          disabled={report.features.length === 0}
-          onClick={() => onConfirm(mapping)}
-        >
+        <Button tone="primary" disabled={features.length === 0} onClick={() => onConfirm(mapping, chosen)}>
           {t('import.confirm')}
         </Button>
       </div>
@@ -232,17 +287,113 @@ export function ImportDialog({
   );
 }
 
+/**
+ * The first few rows of the source table, as they were read.
+ *
+ * Choosing which column is the Farm from a name and a fill count is guesswork when the
+ * names are unhelpful — `f_2`, `NOME`, `cod`. Seeing the values settles it in a glance,
+ * and the columns already mapped are marked so the effect of a choice is visible while
+ * it is being made.
+ */
+function AttributePreview({
+  features,
+  mapping,
+}: {
+  features: ImportReport['features'];
+  mapping: ColumnMapping;
+}) {
+  const t = useT();
+  const ROWS = 5;
+
+  const columns = useMemo(() => {
+    const keys: string[] = [];
+    for (const feature of features) {
+      for (const key of Object.keys(feature.sourceProps)) {
+        if (!keys.includes(key)) keys.push(key);
+      }
+    }
+    return keys;
+  }, [features]);
+
+  const mapped = useMemo(() => {
+    const byColumn = new Map<string, string>();
+    for (const target of ['client', 'farm', 'field'] as AttributeTarget[]) {
+      const source = mapping[target];
+      if (source.column) byColumn.set(source.column, target);
+      if (source.extra) byColumn.set(source.extra, target);
+    }
+    return byColumn;
+  }, [mapping]);
+
+  if (columns.length === 0) return null;
+
+  return (
+    <section className="mt-4">
+      <h3 className="text-[11px] font-semibold text-ink-100">{t('import.preview')}</h3>
+      <p className="mt-1 text-[11px] leading-relaxed text-ink-400">{t('import.previewHelp')}</p>
+      <div className="mt-2 max-h-44 overflow-auto rounded-md border border-ink-700">
+        <table className="w-full border-collapse text-[11px]">
+          <thead className="sticky top-0 bg-ink-850">
+            <tr>
+              {columns.map((key) => (
+                <th
+                  key={key}
+                  scope="col"
+                  className={`whitespace-nowrap border-b border-ink-700 px-2 py-1 text-left
+                    font-semibold ${
+                      mapped.has(key) ? 'text-crop-300' : 'text-ink-300'
+                    }`}
+                >
+                  {key}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {features.slice(0, ROWS).map((feature, index) => (
+              <tr key={index} className="border-b border-ink-850 last:border-0">
+                {columns.map((key) => (
+                  <td
+                    key={key}
+                    className={`max-w-40 truncate px-2 py-1 ${
+                      mapped.has(key) ? 'bg-crop-500/10 text-ink-100' : 'text-ink-400'
+                    }`}
+                    title={stringifyCell(feature.sourceProps[key])}
+                  >
+                    {stringifyCell(feature.sourceProps[key])}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {features.length > ROWS && (
+        <p className="mt-1 text-[10px] text-ink-400">
+          {t('import.previewMore', { count: features.length - ROWS })}
+        </p>
+      )}
+    </section>
+  );
+}
+
+const stringifyCell = (value: unknown): string =>
+  value === null || value === undefined ? '' : String(value);
+
 /* -------------------------------------------------------------------------- */
 /* Overlap resolution                                                          */
 /* -------------------------------------------------------------------------- */
 
 export function OverlapDialog({
   fields,
+  duplicate,
   workspace,
   onResolve,
   onCancel,
 }: {
   fields: [WField, WField];
+  /** True when the two are the same boundary twice, so one of them simply goes. */
+  duplicate: boolean;
   workspace: Workspace;
   onResolve: (keeperId: string, loserId: string) => void;
   onCancel: () => void;
@@ -252,8 +403,14 @@ export function OverlapDialog({
   const loser = fields.find((field) => field.id !== keeperId)!;
 
   return (
-    <Modal title={t('overlap.title')} onClose={onCancel} width="max-w-md">
-      <p className="text-xs leading-relaxed text-ink-300">{t('overlap.intro')}</p>
+    <Modal
+      title={t(duplicate ? 'overlap.duplicateTitle' : 'overlap.title')}
+      onClose={onCancel}
+      width="max-w-md"
+    >
+      <p className="text-xs leading-relaxed text-ink-300">
+        {t(duplicate ? 'overlap.duplicateIntro' : 'overlap.intro')}
+      </p>
 
       <div className="mt-3 space-y-1.5">
         {fields.map((field) => (
@@ -290,14 +447,19 @@ export function OverlapDialog({
         ))}
       </div>
 
-      <p className="mt-3 text-[11px] text-ink-400">
-        {t('overlap.loses', { field: describeField(loser, t) })}
+      <p className={`mt-3 text-[11px] ${duplicate ? 'text-red-300' : 'text-ink-400'}`}>
+        {t(duplicate ? 'overlap.duplicateLoses' : 'overlap.loses', {
+          field: describeField(loser, t),
+        })}
       </p>
 
       <div className="mt-4 flex justify-end gap-2">
         <Button onClick={onCancel}>{t('import.cancel')}</Button>
-        <Button tone="primary" onClick={() => onResolve(keeperId, loser.id)}>
-          {t('overlap.confirm')}
+        <Button
+          tone={duplicate ? 'danger' : 'primary'}
+          onClick={() => onResolve(keeperId, loser.id)}
+        >
+          {t(duplicate ? 'overlap.duplicateConfirm' : 'overlap.confirm')}
         </Button>
       </div>
     </Modal>

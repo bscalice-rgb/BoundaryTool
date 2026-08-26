@@ -2,6 +2,7 @@ import buffer from '@turf/buffer';
 import type { BBox } from 'geojson';
 import { ambientT } from '../i18n/translator';
 import type { StringKey, Translator } from '../i18n/translator';
+import { deleteFields } from '../state/ops';
 import { hasNonAscii, nonAsciiCharacters, toAscii } from './text';
 import type {
   FieldId,
@@ -48,6 +49,11 @@ export interface QaThresholds {
   protrusionWidthM: number;
   /** Share of area that must sit in thin protrusions before it is worth flagging. */
   protrusionAreaShare: number;
+  /**
+   * Share of the smaller field that two fields must share before they stop being an
+   * overlap and start being the same boundary twice.
+   */
+  duplicateAreaShare: number;
 }
 
 export const DEFAULT_THRESHOLDS: QaThresholds = {
@@ -57,6 +63,7 @@ export const DEFAULT_THRESHOLDS: QaThresholds = {
   jaggedMaxSpacingM: 4,
   protrusionWidthM: 8,
   protrusionAreaShare: 0.04,
+  duplicateAreaShare: 0.9,
 };
 
 /* -------------------------------------------------------------------------- */
@@ -87,7 +94,10 @@ export interface FieldGeometry {
  * immutable, so an entry stays valid as long as the same geometry objects are still
  * the field's members.
  */
-const dissolveCache = new Map<FieldId, { members: PolyGeom[]; geometry: PolyGeom | null }>();
+const dissolveCache = new Map<
+  FieldId,
+  { field: WField; members: PolyGeom[]; entry: FieldGeometry }
+>();
 
 function sameMembers(a: PolyGeom[], b: PolyGeom[]): boolean {
   return a.length === b.length && a.every((geometry, index) => geometry === b[index]);
@@ -107,20 +117,28 @@ export function fieldGeometries(workspace: Workspace): FieldGeometry[] {
     const members = membersByField.get(field.id) ?? [];
     const geometries = members.map((f) => f.geometry);
 
+    // The whole entry is returned unchanged when nothing about the field moved, not
+    // just the dissolved geometry. Callers hand these to React as props, so a fresh
+    // object for an unchanged field would re-render a row for someone else's edit.
     const cached = dissolveCache.get(field.id);
+    if (cached && cached.field === field && sameMembers(cached.members, geometries)) {
+      return cached.entry;
+    }
+
     const geometry =
       cached && sameMembers(cached.members, geometries)
-        ? cached.geometry
+        ? cached.entry.geometry
         : unionAll(geometries);
-    dissolveCache.set(field.id, { members: geometries, geometry });
 
-    return {
+    const entry: FieldGeometry = {
       field,
       featureIds: members.map((f) => f.id),
       geometry,
       bbox: geometry ? bboxOf(geometry) : null,
       areaHa: geometry ? areaHa(geometry) : 0,
     };
+    dissolveCache.set(field.id, { field, members: geometries, entry });
+    return entry;
   });
 
   for (const id of dissolveCache.keys()) {
@@ -181,6 +199,7 @@ export function runChecks(
         guidance: guidanceFor('empty-field', t),
         featureIds: [],
         fieldIds: [field.id],
+        autoFix: { kind: 'delete-fields' },
         manual: 'attributes',
       });
     }
@@ -418,6 +437,34 @@ export function runChecks(
       if (!bboxesOverlap(a.bbox!, b.bbox!)) continue;
       const shared = overlapAreaM2(a.geometry!, b.geometry!);
       if (shared <= thresholds.overlapMinM2) continue;
+
+      // Two fields sitting almost exactly on top of each other are not neighbours whose
+      // edges disagree; they are one field imported twice, and clipping the shared area
+      // out of one would leave a sliver rather than fix anything.
+      const smaller = Math.min(areaM2(a.geometry!), areaM2(b.geometry!));
+      const share = smaller > 0 ? shared / smaller : 0;
+      if (share >= thresholds.duplicateAreaShare) {
+        flags.push({
+          id: `duplicate-geometry:${a.field.id}:${b.field.id}`,
+          kind: 'duplicate-geometry',
+          severity: 'blocking',
+          title: t('flag.duplicateGeometry.title', {
+            a: describeField(a.field, t),
+            b: describeField(b.field, t),
+          }),
+          detail: t('flag.duplicateGeometry.detail', {
+            percent: formatNum(share * 100),
+            area: formatHa(shared / 10_000),
+          }),
+          guidance: guidanceFor('duplicate-geometry', t),
+          featureIds: [...a.featureIds, ...b.featureIds],
+          fieldIds: [a.field.id, b.field.id],
+          autoFix: { kind: 'resolve-overlap' },
+          manual: 'attributes',
+        });
+        continue;
+      }
+
       flags.push({
         id: `overlap:${a.field.id}:${b.field.id}`,
         kind: 'overlap',
@@ -488,17 +535,22 @@ function computeProtrusionShare(geometry: PolyGeom, widthM: number): number | nu
 }
 
 /** Explains why a field name looks season-specific, or returns null if it is fine. */
+/**
+ * One compiled alternation rather than a fresh RegExp per crop word per name. The
+ * per-word version cost thirty compilations for every field on every pass, which on a
+ * few hundred fields was the single most expensive thing the checks did.
+ */
+const CROP_PATTERN = new RegExp(`[^a-z](${CROP_WORDS.join('|')})[^a-z]`);
+
 export function namingProblem(name: string, t: Translator = ambientT()): string | null {
   const year = /\b(19|20)\d{2}\b/.exec(name);
   if (year) {
     return t('flag.naming.year', { name, year: year[0] });
   }
-  const lower = ` ${name.toLowerCase()} `;
-  const crop = CROP_WORDS.find((word) =>
-    new RegExp(`[^a-z]${word}[^a-z]`).test(lower.replace(/[^a-z0-9]/g, ' ')),
-  );
+  const words = ` ${name.toLowerCase()} `.replace(/[^a-z0-9]/g, ' ');
+  const crop = CROP_PATTERN.exec(words);
   if (crop) {
-    return t('flag.naming.crop', { name, crop });
+    return t('flag.naming.crop', { name, crop: crop[1] });
   }
   return null;
 }
@@ -714,6 +766,17 @@ export function autoAsciiNames(
   };
 }
 
+/** Deletes the named field rows. Used to clear away rows left with no geometry. */
+export function autoDeleteFields(
+  workspace: Workspace,
+  fieldIds: FieldId[],
+  t: Translator = ambientT(),
+): FixOutcome {
+  const next = deleteFields(workspace, fieldIds);
+  const removed = workspace.fields.length - next.fields.length;
+  return { workspace: next, message: t.n('fix.deletedFields', removed), ok: removed > 0 };
+}
+
 /* -------------------------------------------------------------------------- */
 /* Reviewed warnings                                                           */
 /* -------------------------------------------------------------------------- */
@@ -743,6 +806,7 @@ export const BLOCKING_KINDS: FlagKind[] = [
   'duplicate-name',
   'name-too-long',
   'non-ascii',
+  'duplicate-geometry',
 ];
 
 /** Field ids that cannot be exported, mapped to the reasons why. */

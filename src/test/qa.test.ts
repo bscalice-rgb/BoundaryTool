@@ -4,6 +4,7 @@ import {
   DEFAULT_THRESHOLDS,
   autoAsciiNames,
   autoDeleteFeatures,
+  autoDeleteFields,
   autoFixGeometry,
   autoSimplify,
   namingProblem,
@@ -12,7 +13,7 @@ import {
   runChecks,
 } from '../lib/qa';
 import { areaHa, checkValidity, vertexCount } from '../lib/geo';
-import { combineIntoField, newFeature, newField, updateField } from '../state/ops';
+import { combineIntoField, deleteFeatures, newFeature, newField, updateField } from '../state/ops';
 import { poly, squareRing } from './fixtures';
 
 /* -------------------------------------------------------------------------- */
@@ -348,5 +349,89 @@ describe('characters CropForce will not take', () => {
     const names = fixed.workspace.fields.map((field) => field.field);
     expect(new Set(names).size).toBe(2);
     expect(names).toContain('Acai');
+  });
+});
+
+
+describe('the same boundary imported twice', () => {
+  const twoFields = (geometryA: PolyGeom, geometryB: PolyGeom) => {
+    const a = newField({ client: 'Acme', farm: 'Home', field: 'West' });
+    const b = newField({ client: 'Acme', farm: 'Home', field: 'West copy' });
+    return {
+      fields: [a, b],
+      features: [
+        { ...newFeature(geometryA, 'one.kml'), fieldId: a.id },
+        { ...newFeature(geometryB, 'two.kml'), fieldId: b.id },
+      ],
+    };
+  };
+
+  it('calls two copies of one boundary a duplicate, not an overlap', () => {
+    const workspace = twoFields(bigSquare(), bigSquare());
+    const kinds = kindsOf(workspace);
+    expect(kinds).toContain('duplicate-geometry');
+    expect(kinds).not.toContain('overlap');
+  });
+
+  it('still calls a partial overlap an overlap', () => {
+    // Shifted by half its width: they share far too little to be the same field.
+    const workspace = twoFields(bigSquare(), bigSquare(0.0015));
+    const kinds = kindsOf(workspace);
+    expect(kinds).toContain('overlap');
+    expect(kinds).not.toContain('duplicate-geometry');
+  });
+
+  it('catches a copy that is not quite pixel-identical', () => {
+    const workspace = twoFields(bigSquare(), bigSquare(0.00005));
+    expect(kindsOf(workspace)).toContain('duplicate-geometry');
+  });
+
+  it('leaves the fields alone when they merely touch', () => {
+    const workspace = twoFields(bigSquare(), bigSquare(0.003));
+    const kinds = kindsOf(workspace);
+    expect(kinds).not.toContain('duplicate-geometry');
+    expect(kinds).not.toContain('overlap');
+  });
+});
+
+describe('rows with no geometry left', () => {
+  it('offers to delete an empty field, and does', () => {
+    const field = newField({ client: 'Acme', farm: 'Home', field: 'Ghost' });
+    const workspace = { fields: [field], features: [] };
+    const flag = runChecks(workspace).find((f) => f.kind === 'empty-field');
+    expect(flag?.autoFix).toEqual({ kind: 'delete-fields' });
+
+    const fixed = autoDeleteFields(workspace, [field.id]);
+    expect(fixed.ok).toBe(true);
+    expect(fixed.workspace.fields).toEqual([]);
+  });
+
+  it('takes a field away with its last polygon', () => {
+    const field = newField({ client: 'Acme', farm: 'Home', field: 'West' });
+    const feature = { ...newFeature(bigSquare(), 'a.kml'), fieldId: field.id };
+    const workspace = { fields: [field], features: [feature] };
+
+    const after = deleteFeatures(workspace, [feature.id]);
+    expect(after.features).toEqual([]);
+    expect(after.fields).toEqual([]);
+  });
+
+  it('leaves a field alone while it still has a polygon', () => {
+    const field = newField({ client: 'Acme', farm: 'Home', field: 'West' });
+    const one = { ...newFeature(bigSquare(), 'a.kml'), fieldId: field.id };
+    const two = { ...newFeature(bigSquare(0.01), 'a.kml'), fieldId: field.id };
+
+    const after = deleteFeatures({ fields: [field], features: [one, two] }, [one.id]);
+    expect(after.fields).toHaveLength(1);
+  });
+
+  // A row created empty is the user's, not this action's leftover.
+  it('does not sweep away a field that was already empty', () => {
+    const empty = newField({ client: 'Acme', farm: 'Home', field: 'Planned' });
+    const other = newField({ client: 'Acme', farm: 'Home', field: 'West' });
+    const feature = { ...newFeature(bigSquare(), 'a.kml'), fieldId: other.id };
+
+    const after = deleteFeatures({ fields: [empty, other], features: [feature] }, [feature.id]);
+    expect(after.fields.map((f) => f.field)).toEqual(['Planned']);
   });
 });

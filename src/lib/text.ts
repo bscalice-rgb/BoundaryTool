@@ -62,7 +62,15 @@ const PUNCTUATION: Record<string, string> = {
  * that a grower would recognise as their own field, and inventing one would be worse
  * than leaving the name visibly shorter for them to correct.
  */
+// eslint-disable-next-line no-control-regex
+const PLAIN = /^[\x20-\x7e]*$/;
+
 export function toAscii(value: string): string {
+  // Most names are already plain, and the checks ask about every one of them on every
+  // pass. Normalising and rebuilding a string that was never going to change is the
+  // sort of work that only shows up once there are a few hundred fields.
+  if (PLAIN.test(value)) return value.replace(/\s+/g, ' ').trim();
+
   const folded = [...value]
     .map((character) => SPELLED_OUT[character] ?? PUNCTUATION[character] ?? character)
     .join('')
@@ -75,7 +83,8 @@ export function toAscii(value: string): string {
 }
 
 /** True when a value would change on the way through `toAscii`. */
-export const hasNonAscii = (value: string): boolean => toAscii(value) !== value.trim();
+export const hasNonAscii = (value: string): boolean =>
+  !PLAIN.test(value) && toAscii(value) !== value.trim();
 
 /** The characters in a value that will not survive, for saying so in a message. */
 export function nonAsciiCharacters(value: string): string[] {

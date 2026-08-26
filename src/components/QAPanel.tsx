@@ -568,6 +568,7 @@ const FLAG_LABELS: Record<QAFlag['kind'], StringKey> = {
   'duplicate-name': 'label.consistentNaming',
   'name-too-long': 'label.consistentNaming',
   'non-ascii': 'label.consistentNaming',
+  'duplicate-geometry': 'label.noOverlaps',
 };
 
 function SectionLabel({ children }: { children: React.ReactNode }) {

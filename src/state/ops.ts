@@ -138,9 +138,29 @@ export function setGeometry(
   };
 }
 
+/**
+ * Deletes polygons, and with them any field whose last polygon has just gone.
+ *
+ * A field row is a name attached to geometry; once the geometry is deleted the row is a
+ * blocking flag about something the user has already dealt with. Leaving it behind made
+ * deleting a boundary a two-step job. Undo restores both halves together.
+ */
 export function deleteFeatures(workspace: Workspace, featureIds: FeatureId[]): Workspace {
   const remove = new Set(featureIds);
-  return { ...workspace, features: workspace.features.filter((f) => !remove.has(f.id)) };
+  const next = { ...workspace, features: workspace.features.filter((f) => !remove.has(f.id)) };
+  return dropEmptyAnonymousFields(next, workspace);
+}
+
+/** Removes field rows outright. Their polygons, if any, are released rather than deleted. */
+export function deleteFields(workspace: Workspace, fieldIds: FieldId[]): Workspace {
+  const remove = new Set(fieldIds);
+  if (remove.size === 0) return workspace;
+  return {
+    fields: workspace.fields.filter((field) => !remove.has(field.id)),
+    features: workspace.features.map((feature) =>
+      feature.fieldId && remove.has(feature.fieldId) ? { ...feature, fieldId: null } : feature,
+    ),
+  };
 }
 
 /** Replaces one feature with several. Used by the split tool. */
@@ -271,14 +291,13 @@ export function assignToField(
 }
 
 /**
- * Removes fields whose last member has just moved somewhere else.
+ * Removes fields whose last member has just left — moved to another field, or deleted.
  *
- * Only this action's leftovers are swept, and only where the polygons were *moved*
- * rather than deleted: the row has been superseded by whichever field they went to, and
- * leaving a named ghost behind would put a row in the table that blocks the export for
- * having no geometry. A field created empty on purpose is untouched — the user made it
- * deliberately and the quality panel will ask them to give it polygons. Undo restores
- * either way.
+ * Only this action's leftovers are swept: the row has been superseded by wherever the
+ * polygons went, and leaving a named ghost behind would put a row in the table that
+ * blocks the export for having no geometry. A field that was already empty before the
+ * action is untouched, because nothing that just happened is the reason it is empty.
+ * Undo restores either way.
  */
 function dropEmptyAnonymousFields(next: Workspace, previous: Workspace): Workspace {
   const populated = new Set(next.features.map((f) => f.fieldId));

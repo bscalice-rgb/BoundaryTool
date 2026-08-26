@@ -60,7 +60,8 @@ export type FlagKind =
   | 'empty-field'
   | 'duplicate-name'
   | 'name-too-long'
-  | 'non-ascii';
+  | 'non-ascii'
+  | 'duplicate-geometry';
 
 /** How the "Fix manually" button should set the app up for hand-editing. */
 export type ManualTool =
@@ -94,7 +95,8 @@ export type AutoFixSpec =
   | { kind: 'resolve-overlap' }
   | { kind: 'uniquify-names' }
   | { kind: 'shorten-names' }
-  | { kind: 'asciify-names' };
+  | { kind: 'asciify-names' }
+  | { kind: 'delete-fields' };
 
 /** The editing tool currently armed in the map toolbar. */
 export type Tool = 'select' | 'edit' | 'move' | 'draw' | 'cut-hole' | 'split' | 'simplify';
