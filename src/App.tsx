@@ -31,7 +31,12 @@ import {
   updateField,
   updateFields,
 } from './state/ops';
-import { type ColumnMapping, type ImportReport, importFiles } from './lib/import';
+import {
+  READABLE_EXTENSIONS,
+  type ColumnMapping,
+  type ImportReport,
+  importFiles,
+} from './lib/import';
 import { areaHa, bboxOf, simplifyMeters, splitByLine, vertexCount } from './lib/geo';
 import { formatLatLon } from './lib/coords';
 import {
@@ -73,7 +78,7 @@ import {
 } from './components/dialogs';
 import { InfoDot, ToastStack, type Toast } from './components/ui';
 
-const ACCEPTED = '.kml,.kmz,.zip,.geojson,.json,.shp,.shx,.dbf,.prj,.cpg';
+const ACCEPTED = READABLE_EXTENSIONS.map((ext) => `.${ext}`).join(',');
 
 /** Panel sizing. The map keeps at least this much room whatever the panels want. */
 const MAP_MIN_WIDTH = 360;

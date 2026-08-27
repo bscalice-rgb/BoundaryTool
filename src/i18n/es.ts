@@ -45,7 +45,7 @@ export const es: Dictionary = {
   'empty.dropHere': 'Suelte archivos en cualquier parte de esta ventana para empezar.',
   'empty.choose': 'Elegir archivos',
   'empty.formats':
-    '.kml · .kmz · .zip (shapefile) · .geojson · .json · o un juego suelto .shp/.shx/.dbf/.prj',
+    '.kml · .kmz · .geojson · .json · .zip / .rar / .7z · o un juego suelto .shp/.shx/.dbf/.prj',
   'empty.dropOverlay': 'Suelte archivos de contornos para cargarlos',
 
   'tool.select': 'Seleccionar',
@@ -599,7 +599,11 @@ export const es: Dictionary = {
   'toast.flagsWithoutPolygons':
     'Esas alertas son sobre filas de lotes, no sobre polígonos del mapa.',
 
-  'note.unsupported': '{file}: tipo de archivo no admitido (se aceptan .kml, .kmz, .zip, .geojson y .json).',
+  'note.unsupported': '{file}: tipo de archivo no admitido (se aceptan .kml, .kmz, .geojson, .json y archivos comprimidos .zip, .rar o .7z).',
+  'note.nothingInArchive': 'el archivo comprimido no contiene archivos de contornos (.shp, .kml, .kmz, .geojson o .json).',
+  'note.archiveEncrypted': 'el archivo comprimido está protegido con contraseña. Descomprímalo en su computadora y cargue los archivos de su interior.',
+  'note.archiveTruncated': 'no se pudo descomprimir {entry}. El archivo parece dañado, o es una parte de un juego dividido en varios volúmenes.',
+  'note.archiveTooDeep': '{file}: los archivos comprimidos dentro de otros solo se abren hasta dos niveles. Descomprímalo y cargue los archivos de su interior.',
   'note.badKml': 'el KML no es un XML bien formado.',
   'note.noKmlInArchive': 'no se encontró ningún archivo .kml dentro del paquete.',
   'note.mergedKml': '{file}: se combinaron {count} documentos KML del paquete.',

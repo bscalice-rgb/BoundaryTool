@@ -9,8 +9,9 @@ import { fileURLToPath } from 'node:url';
 import JSZip from 'jszip';
 import proj4 from 'proj4';
 import type { Position } from 'geojson';
-import { writeDbf, writeShpShx } from '../src/lib/shapefile';
+import { buildShapefile, writeDbf, writeShpShx } from '../src/lib/shapefile';
 import { UTM31N_WKT, KML_DOC } from '../src/test/fixtures';
+import { make7z, makeRar5, member } from '../src/test/archives';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const FIXTURE_DIR = join(here, 'fixtures');
@@ -50,7 +51,51 @@ export async function writeFixtures(): Promise<void> {
   zip.file('parcelles.prj', UTM31N_WKT);
   writeFileSync(join(FIXTURE_DIR, 'parcelles.zip'), await zip.generateAsync({ type: 'nodebuffer' }));
 
-  // 3. A plain WGS84 GeoJSON.
+  // 3. A shapefile set packed into a .rar, folder and all, the way a grower's agronomist
+  //     tends to send one from Windows.
+  const talhoes = buildShapefile(
+    [
+      {
+        geometry: { type: 'Polygon', coordinates: [ring(-47.9, -15.8, 0.004)] },
+        attributes: { Client: 'Fazenda Boa Vista', Farm: 'Sede', Field: 'Talhao 1' },
+      },
+    ],
+    [
+      { name: 'Client', length: 30 },
+      { name: 'Farm', length: 30 },
+      { name: 'Field', length: 30 },
+    ],
+  );
+  writeFileSync(
+    join(FIXTURE_DIR, 'talhoes.rar'),
+    Buffer.from(
+      makeRar5([
+        member('talhoes/talhoes.shp', talhoes.shp),
+        member('talhoes/talhoes.shx', talhoes.shx),
+        member('talhoes/talhoes.dbf', talhoes.dbf),
+        member('talhoes/talhoes.prj', talhoes.prj),
+      ]),
+    ),
+  );
+
+  // 4. A GeoJSON packed into a .7z.
+  writeFileSync(
+    join(FIXTURE_DIR, 'lotes.7z'),
+    Buffer.from(
+      make7z([
+        member(
+          'lotes.geojson',
+          JSON.stringify({
+            type: 'Feature',
+            properties: { Client: 'Rancho Sur', Farm: 'Norte', Field: 'Lote 4' },
+            geometry: { type: 'Polygon', coordinates: [ring(-58.4, -34.6, 0.004)] },
+          }),
+        ),
+      ]),
+    ),
+  );
+
+  // 5. A plain WGS84 GeoJSON.
   writeFileSync(
     join(FIXTURE_DIR, 'extra.geojson'),
     JSON.stringify({

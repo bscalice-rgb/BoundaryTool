@@ -3,9 +3,9 @@
 A browser tool for turning whatever field boundary files you were sent into a single
 zipped shapefile that CropForce will accept.
 
-Load KML, KMZ, zipped shapefiles and GeoJSON — as many at once as you like — group the
-polygons into fields, clean them up against the boundary criteria, and export one merged
-shapefile with one row per field.
+Load KML, KMZ, GeoJSON and shapefiles — loose, or packed in a `.zip`, `.rar` or `.7z`,
+as many at once as you like — group the polygons into fields, clean them up against the
+boundary criteria, and export one merged shapefile with one row per field.
 
 ## Languages
 
@@ -26,15 +26,17 @@ Areas and other numbers are formatted for the chosen locale, so a hectare figure
 There is no backend. No server, no database, no serverless functions, no analytics, no
 accounts. Vercel serves static files and nothing else.
 
-Your files are read by JavaScript running in your tab. Parsing, reprojection, editing,
-geometry operations, quality checks and the shapefile writer all run locally, and the
-download is produced from an in-memory blob. Nothing is uploaded, and nothing is written
+Your files are read by JavaScript running in your tab. Unpacking, parsing, reprojection,
+editing, geometry operations, quality checks and the shapefile writer all run locally, and
+the download is produced from an in-memory blob. Nothing is uploaded, and nothing is written
 to `localStorage`, `sessionStorage`, cookies or IndexedDB — **refreshing the page
 discards the workspace, by design**.
 
-The only network traffic the app makes after loading is basemap tiles from Esri (and
-OpenStreetMap if you switch to the street layer). There are no API keys, secrets or
-environment variables anywhere in the project.
+The only third-party traffic the app makes after loading is basemap tiles from Esri (and
+OpenStreetMap if you switch to the street layer). The first `.rar` or `.7z` you open also
+fetches the archive decoder, but that is a static asset of the app itself, served from the
+same origin as its JavaScript — no different from the rest of the page loading. There are
+no API keys, secrets or environment variables anywhere in the project.
 
 One caveat worth stating plainly: the **zoom to my location** button asks your browser
 where you are, and your browser may consult its own location service to answer that —
@@ -298,6 +300,26 @@ Keyboard: `V` select, `E` vertices, `M` move, `D` draw, `H` cut hole, `S` split,
 - `.geojson` / `.json`, including files declaring a projected CRS in the legacy `crs`
   member (common EPSG families are resolved offline; anything exotic is reported rather
   than silently misplaced)
+- `.rar` and `.7z`, unpacked in the browser — see below
+
+### Archives
+
+A `.zip`, `.rar` or `.7z` is opened and its members are read exactly as if you had
+dropped them yourself, so a shapefile set inside a folder inside an archive works without
+you having to unpack anything first. Each member is listed in the import dialog under the
+archive it came from — `talhoes.rar › talhoes/talhoes.shp` — which is how two files with
+the same name in different archives stay separable, and how the source column stays
+traceable afterwards.
+
+Only members the tool can read are decompressed; a folder of aerial imagery sitting next
+to the boundaries costs nothing to skip past. An archive inside an archive is followed two
+levels down and no further. Password-protected archives are refused rather than half-read:
+unpack those yourself and load the files.
+
+`.rar` and `.7z` are decoded by [libarchive](https://libarchive.org) compiled to
+WebAssembly. The 600 KB decoder is served with the app and fetched the first time one of
+those files is actually opened, so nobody who only ever loads a KML pays for it. Like
+everything else here it runs in your browser — no file is uploaded to unpack it.
 
 One mapping is applied to a whole batch. If the files you are loading name their columns
 differently from each other — one calls it `Field`, another `name` — import them

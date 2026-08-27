@@ -45,7 +45,7 @@ export const pt: Dictionary = {
   'empty.dropHere': 'Solte arquivos em qualquer lugar desta janela para começar.',
   'empty.choose': 'Escolher arquivos',
   'empty.formats':
-    '.kml · .kmz · .zip (shapefile) · .geojson · .json · ou um conjunto solto .shp/.shx/.dbf/.prj',
+    '.kml · .kmz · .geojson · .json · .zip / .rar / .7z · ou um conjunto solto .shp/.shx/.dbf/.prj',
   'empty.dropOverlay': 'Solte os arquivos de contorno para carregá-los',
 
   'tool.select': 'Selecionar',
@@ -607,7 +607,11 @@ export const pt: Dictionary = {
   'toast.flagsWithoutPolygons':
     'Esses apontamentos são sobre linhas de talhão, não sobre polígonos no mapa.',
 
-  'note.unsupported': '{file}: tipo de arquivo não suportado (aceitamos .kml, .kmz, .zip, .geojson e .json).',
+  'note.unsupported': '{file}: tipo de arquivo não suportado (aceitamos .kml, .kmz, .geojson, .json e arquivos compactados .zip, .rar ou .7z).',
+  'note.nothingInArchive': 'o arquivo compactado não contém arquivos de contorno (.shp, .kml, .kmz, .geojson ou .json).',
+  'note.archiveEncrypted': 'o arquivo compactado está protegido por senha. Descompacte-o no seu computador e carregue os arquivos de dentro dele.',
+  'note.archiveTruncated': 'não foi possível descompactar {entry}. O arquivo parece danificado, ou é uma parte de um conjunto dividido em vários volumes.',
+  'note.archiveTooDeep': '{file}: arquivos compactados dentro de outros são abertos só até dois níveis. Descompacte este e carregue os arquivos de dentro dele.',
   'note.badKml': 'o KML não é um XML bem formado.',
   'note.noKmlInArchive': 'nenhum arquivo .kml encontrado dentro do pacote.',
   'note.mergedKml': '{file}: {count} documentos KML do pacote foram combinados.',

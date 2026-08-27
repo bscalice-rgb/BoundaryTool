@@ -23,6 +23,8 @@ const columnsOf = (mapping: ColumnMapping) => ({
   field: mapping.field.column,
 });
 import { areaHa, bboxOf } from '../lib/geo';
+import { buildShapefile } from '../lib/shapefile';
+import { make7z, makeRar5, member } from './archives';
 import {
   KML_DOC,
   fileFrom,
@@ -75,6 +77,95 @@ describe('KML and KMZ', () => {
     zip.file('readme.txt', 'nothing here');
     const report = await importFiles([fileFrom('empty.kmz', await zip.generateAsync({ type: 'arraybuffer' }))]);
     expect(report.errors[0]).toContain('no .kml file found');
+  });
+});
+
+describe('rar and 7z archives', () => {
+  const GEOJSON = JSON.stringify({
+    type: 'Feature',
+    properties: { Client: 'Rancho Sur', Field: 'Lote 4' },
+    geometry: { type: 'Polygon', coordinates: [squareRing(-58.4, -34.6, 0.01)] },
+  });
+
+  it('reads a GeoJSON out of a .7z', async () => {
+    const archive = make7z([member('lotes/lote4.geojson', GEOJSON)]);
+    const report = await importFiles([fileFrom('lotes.7z', archive)]);
+
+    expect(report.errors).toEqual([]);
+    expect(report.features).toHaveLength(1);
+    expect(report.features[0].sourceProps).toMatchObject({ Field: 'Lote 4' });
+    expect(isWgs84(bboxOf(report.features[0].geometry))).toBe(true);
+  });
+
+  it('names an archive member after the archive it came out of', async () => {
+    const report = await importFiles([fileFrom('entrega.rar', makeRar5([member('doc.kml', KML_DOC)]))]);
+
+    expect(report.errors).toEqual([]);
+    expect(report.features).toHaveLength(2);
+    for (const feature of report.features) {
+      expect(feature.source).toBe('entrega.rar \u203a doc.kml');
+    }
+  });
+
+  it('reads a loose shapefile set packed in a .rar', async () => {
+    const bundle = buildShapefile(
+      [
+        {
+          geometry: poly([squareRing(1.0, 51.0, 0.01)]),
+          attributes: { Client: 'Acme', Farm: 'Home', Field: 'Top' },
+        },
+      ],
+      [
+        { name: 'Client', length: 30 },
+        { name: 'Farm', length: 30 },
+        { name: 'Field', length: 30 },
+      ],
+    );
+    const archive = makeRar5([
+      member('plots/plots.shp', bundle.shp),
+      member('plots/plots.shx', bundle.shx),
+      member('plots/plots.dbf', bundle.dbf),
+      member('plots/plots.prj', bundle.prj),
+      member('__MACOSX/._plots.shp', 'junk'),
+      member('plots/readme.txt', 'not a boundary'),
+    ]);
+
+    const report = await importFiles([fileFrom('plots.rar', archive)]);
+
+    expect(report.errors).toEqual([]);
+    expect(report.features).toHaveLength(1);
+    expect(report.features[0].sourceProps).toMatchObject({ Client: 'Acme', Field: 'Top' });
+  });
+
+  it('says so when an archive holds nothing it can read', async () => {
+    const report = await importFiles([
+      fileFrom('photos.7z', make7z([member('field.jpg', 'not really a photo')])),
+    ]);
+
+    expect(report.features).toEqual([]);
+    expect(report.errors[0]).toContain('photos.7z');
+    expect(report.errors[0]).toContain('no boundary files');
+  });
+
+  it('follows one archive inside another', async () => {
+    const inner = make7z([member('lote4.geojson', GEOJSON)]);
+    const report = await importFiles([
+      fileFrom('entrega.rar', makeRar5([member('lotes.7z', inner)])),
+    ]);
+
+    expect(report.errors).toEqual([]);
+    expect(report.features).toHaveLength(1);
+    expect(report.features[0].source).toBe('entrega.rar \u203a lotes.7z \u203a lote4.geojson');
+  });
+
+  it('stops rather than unpacking archives without end', async () => {
+    const inner = makeRar5([member('lote4.geojson', GEOJSON)]);
+    const middle = makeRar5([member('inner.rar', inner)]);
+    const report = await importFiles([fileFrom('outer.rar', makeRar5([member('middle.rar', middle)]))]);
+
+    expect(report.features).toEqual([]);
+    expect(report.errors).toHaveLength(1);
+    expect(report.errors[0]).toContain('inner.rar');
   });
 });
 

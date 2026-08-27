@@ -11,6 +11,7 @@ import type {
 } from 'geojson';
 import type { PolyGeom } from '../types';
 import { normalize } from './geo';
+import { ARCHIVE_EXTENSIONS, isArchiveExtension, readArchive } from './archive';
 import {
   crsNameFromWkt,
   defForEpsg,
@@ -39,6 +40,26 @@ export interface ImportReport {
 
 const SHAPE_EXTENSIONS = ['shp', 'shx', 'dbf', 'prj', 'cpg'] as const;
 
+/** Everything the file picker offers, and everything an archive is unpacked for. */
+export const READABLE_EXTENSIONS = [
+  'kml',
+  'kmz',
+  'geojson',
+  'json',
+  'zip',
+  ...ARCHIVE_EXTENSIONS,
+  ...SHAPE_EXTENSIONS,
+] as const;
+
+const isReadable = (ext: string): boolean =>
+  (READABLE_EXTENSIONS as readonly string[]).includes(ext);
+
+/**
+ * How far down archives are followed. Someone who has zipped a folder of rars has a
+ * filing problem this tool should not try to solve for them.
+ */
+const MAX_ARCHIVE_DEPTH = 2;
+
 const extensionOf = (name: string): string => {
   const dot = name.lastIndexOf('.');
   return dot === -1 ? '' : name.slice(dot + 1).toLowerCase();
@@ -55,7 +76,21 @@ const baseNameOf = (name: string): string => {
 
 export async function importFiles(files: File[]): Promise<ImportReport> {
   const report: ImportReport = { features: [], notes: [], errors: [] };
+  await importGroup(files, report, 0);
+  return report;
+}
 
+/**
+ * Reads one set of files that arrived together — a drop, or the contents of one archive.
+ *
+ * `depth` counts how many archives have been opened to get here, so a file that has been
+ * packed inside a pack inside a pack stops rather than being followed forever.
+ */
+async function importGroup(
+  files: File[],
+  report: ImportReport,
+  depth: number,
+): Promise<void> {
   // A loose shapefile arrives as several sibling files that only mean something
   // together, so those are collected by base name before anything else is parsed.
   const looseShapeParts = new Map<string, Map<string, File>>();
@@ -74,7 +109,7 @@ export async function importFiles(files: File[]): Promise<ImportReport> {
 
   for (const file of standalone) {
     try {
-      await importStandalone(file, report);
+      await importStandalone(file, report, depth);
     } catch (error) {
       report.errors.push(`${file.name}: ${messageOf(error)}`);
     }
@@ -87,8 +122,6 @@ export async function importFiles(files: File[]): Promise<ImportReport> {
       report.errors.push(`${base}.shp: ${messageOf(error)}`);
     }
   }
-
-  return report;
 }
 
 const messageOf = (error: unknown): string =>
@@ -98,8 +131,16 @@ const messageOf = (error: unknown): string =>
 /* Per-format readers                                                          */
 /* -------------------------------------------------------------------------- */
 
-async function importStandalone(file: File, report: ImportReport): Promise<void> {
+async function importStandalone(
+  file: File,
+  report: ImportReport,
+  depth: number,
+): Promise<void> {
   const ext = extensionOf(file.name);
+  if (isArchiveExtension(ext)) {
+    await importArchive(file, report, depth);
+    return;
+  }
   switch (ext) {
     case 'kml':
       collect(parseKmlText(await file.text()), file.name, report);
@@ -108,7 +149,7 @@ async function importStandalone(file: File, report: ImportReport): Promise<void>
       collect(await parseKmz(await file.arrayBuffer(), file.name, report), file.name, report);
       return;
     case 'zip':
-      await importZip(file, report);
+      await importZip(file, report, depth);
       return;
     case 'geojson':
     case 'json': {
@@ -156,8 +197,37 @@ async function parseKmz(
   };
 }
 
+/**
+ * A .rar or .7z, read through libarchive.
+ *
+ * Unlike a .zip, these are never handed to shpjs whole — the members are unpacked and
+ * then read exactly as if the user had dropped them, which is what makes a shapefile
+ * set inside one work at all.
+ */
+async function importArchive(file: File, report: ImportReport, depth: number): Promise<void> {
+  if (depth >= MAX_ARCHIVE_DEPTH) {
+    report.errors.push(ambientT()('note.archiveTooDeep', { file: file.name }));
+    return;
+  }
+  const entries = await readArchive(await file.arrayBuffer(), (path) =>
+    isReadable(extensionOf(path)),
+  );
+  if (entries.length === 0) {
+    throw new Error(ambientT()('note.nothingInArchive'));
+  }
+  const members = entries.map((entry) => memberFile(file.name, entry.path, entry.bytes));
+  await importGroup(members, report, depth + 1);
+}
+
+/**
+ * Names a file taken out of an archive after the archive it came from, so the import
+ * dialog can tell two `boundaries.shp` apart and the source column stays traceable.
+ */
+const memberFile = (archive: string, path: string, bytes: BlobPart): File =>
+  new File([bytes], `${archive} \u203a ${path}`);
+
 /** A .zip is either a zipped shapefile bundle or an archive of other supported files. */
-async function importZip(file: File, report: ImportReport): Promise<void> {
+async function importZip(file: File, report: ImportReport, depth: number): Promise<void> {
   const buffer = await file.arrayBuffer();
   const zip = await JSZip.loadAsync(buffer);
   const entries = Object.values(zip.files).filter(
@@ -179,18 +249,21 @@ async function importZip(file: File, report: ImportReport): Promise<void> {
     return;
   }
 
-  // Not a shapefile bundle: read any KML/KMZ/GeoJSON members it contains instead.
-  const nested = entries.filter((entry) =>
-    ['kml', 'kmz', 'geojson', 'json'].includes(extensionOf(entry.name)),
-  );
+  // Not a shapefile bundle: read whatever supported members it does contain instead.
+  const nested = entries.filter((entry) => isReadable(extensionOf(entry.name)));
   if (nested.length === 0) {
-    throw new Error('the archive contains no .shp, .kml or .geojson files.');
+    throw new Error(ambientT()('note.nothingInArchive'));
   }
-  for (const entry of nested) {
-    const blob = await entry.async('blob');
-    const nestedFile = new File([blob], entry.name.split('/').pop() ?? entry.name);
-    await importStandalone(nestedFile, report);
+  // The shapefile branch above is exempt: shpjs reads that zip whole, so no matter how
+  // deep it sits it costs one step rather than another round of unpacking.
+  if (depth >= MAX_ARCHIVE_DEPTH) {
+    report.errors.push(ambientT()('note.archiveTooDeep', { file: file.name }));
+    return;
   }
+  const members = await Promise.all(
+    nested.map(async (entry) => memberFile(file.name, entry.name, await entry.async('blob'))),
+  );
+  await importGroup(members, report, depth + 1);
 }
 
 /**

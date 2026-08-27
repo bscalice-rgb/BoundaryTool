@@ -43,7 +43,7 @@ export const en = {
   'empty.dropHere': 'Drop files anywhere on this window to begin.',
   'empty.choose': 'Choose files',
   'empty.formats':
-    '.kml · .kmz · .zip (shapefile) · .geojson · .json · or a loose .shp/.shx/.dbf/.prj set',
+    '.kml · .kmz · .geojson · .json · .zip / .rar / .7z · or a loose .shp/.shx/.dbf/.prj set',
   'empty.dropOverlay': 'Drop boundary files to load them',
 
   'tool.select': 'Select',
@@ -586,7 +586,11 @@ export const en = {
   'toast.bulkApplied.other': 'Applied {columns} to {count} fields.',
   'toast.flagsWithoutPolygons': 'Those flags are about field rows rather than polygons on the map.',
 
-  'note.unsupported': '{file}: unsupported file type (.kml, .kmz, .zip, .geojson and .json are accepted).',
+  'note.unsupported': '{file}: unsupported file type (.kml, .kmz, .geojson, .json and .zip, .rar or .7z archives are accepted).',
+  'note.nothingInArchive': 'the archive holds no boundary files (.shp, .kml, .kmz, .geojson or .json).',
+  'note.archiveEncrypted': 'the archive is password-protected. Unpack it on your own computer and load the files from inside it.',
+  'note.archiveTruncated': '{entry} could not be unpacked. The archive looks damaged, or it is one part of a set split across several volumes.',
+  'note.archiveTooDeep': '{file}: archives inside archives are only opened two levels down. Unpack this one and load the files from inside it.',
   'note.badKml': 'the KML is not well-formed XML.',
   'note.noKmlInArchive': 'no .kml file found inside the archive.',
   'note.mergedKml': '{file}: merged {count} KML documents from the archive.',

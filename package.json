@@ -30,6 +30,7 @@
     "@turf/unkink-polygon": "^7.4.0",
     "jszip": "^3.10.1",
     "leaflet": "^1.9.4",
+    "libarchive-wasm": "^1.2.0",
     "proj4": "^2.21.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

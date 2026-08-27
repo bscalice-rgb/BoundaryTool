@@ -93,6 +93,44 @@ test('imports a KMZ, a UTM shapefile and a GeoJSON in one drop', async ({ page }
   await expect(page.locator('text=/4 polygons? not assigned/')).toBeVisible();
 });
 
+test('reads boundaries out of a .rar and a .7z', async ({ page }) => {
+  await page.goto('/');
+  await page.setInputFiles('input[type=file]', [
+    join(FIXTURE_DIR, 'talhoes.rar'),
+    join(FIXTURE_DIR, 'lotes.7z'),
+  ]);
+
+  const dialog = page.getByRole('dialog', { name: 'Import boundaries' });
+  await expect(dialog).toBeVisible();
+  // Each member is listed under the archive it came out of, so two files with the same
+  // name inside different archives can still be told apart and ticked separately.
+  await expect(dialog.getByText('talhoes.rar \u203a talhoes/talhoes.shp')).toBeVisible();
+  await expect(dialog.getByText('lotes.7z \u203a lotes.geojson')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Add to workspace' }).click();
+  await expect(dialog).toBeHidden();
+
+  const names = await page
+    .locator('input[aria-label="Field"]')
+    .evaluateAll((inputs) => (inputs as HTMLInputElement[]).map((input) => input.value).sort());
+  expect(names).toEqual(['Lote 4', 'Talhao 1']);
+
+  // The decoder is a WebAssembly file served with the app itself; unpacking must not
+  // put anything on the wire.
+  const unexpected = [...new Set(externalHosts)].filter(
+    (host) => !/arcgisonline\.com$|openstreetmap\.org$/.test(host),
+  );
+  expect(unexpected).toEqual([]);
+});
+
+test('offers the archive formats in the file picker', async ({ page }) => {
+  await page.goto('/');
+  const accept = await page.locator('input[type=file]').getAttribute('accept');
+  for (const extension of ['.zip', '.rar', '.7z']) {
+    expect(accept).toContain(extension);
+  }
+});
+
 test('maps a source column onto a CropForce attribute', async ({ page }) => {
   await page.goto('/');
   await page.setInputFiles('input[type=file]', FILES);
