@@ -405,6 +405,107 @@ test('resolves an overlap between two fields and undoes the clip', async ({ page
   await expect(page.locator('article', { hasText: 'overlaps' })).toBeVisible();
 });
 
+test.describe('the three ways out of an overlap', () => {
+  /** Loads the hundred-against-forty pair that disagree about three metres of edge. */
+  async function importNeighbours(page: Page) {
+    await page.setInputFiles('input[type=file]', join(FIXTURE_DIR, 'neighbours.geojson'));
+    const dialog = page.getByRole('dialog', { name: 'Import boundaries' });
+    await expect(dialog).toBeVisible();
+    await page.getByRole('button', { name: 'Add to workspace' }).click();
+    await expect(dialog).toBeHidden();
+  }
+
+  test('trims the larger field without being asked which one that is', async ({ page }) => {
+    await page.goto('/');
+    await importNeighbours(page);
+
+    const overlapFlag = page.locator('article', { hasText: 'overlaps' });
+    await expect(overlapFlag).toBeVisible();
+    await overlapFlag.getByRole('button', { name: 'Auto-fix' }).click();
+
+    const dialog = page.getByRole('dialog', { name: 'Resolve overlap' });
+    // The default route names the larger of the two and needs nothing from the user.
+    const trimLarger = dialog.getByRole('radio', { name: /Trim the larger field/ });
+    await expect(trimLarger).toBeChecked();
+    await expect(dialog.getByText(/Talhao Grande is the larger of the two/)).toBeVisible();
+
+    await dialog.getByRole('button', { name: 'Clip the overlap' }).click();
+    await expect(overlapFlag).toBeHidden();
+    await expect(page.getByText('0 blocking')).toBeVisible();
+
+    await page.keyboard.press('Control+z');
+    await expect(page.locator('article', { hasText: 'overlaps' })).toBeVisible();
+  });
+
+  test('shrinks both apart by the smallest inset that parts them', async ({ page }) => {
+    await page.goto('/');
+    await importNeighbours(page);
+
+    await page.locator('article', { hasText: 'overlaps' }).getByRole('button', { name: 'Auto-fix' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Resolve overlap' });
+
+    // The inset is measured after the dialog opens, so the option starts unavailable.
+    const shrink = dialog.getByRole('radio', { name: /Shrink both apart/ });
+    await expect(shrink).toBeEnabled();
+    await expect(dialog.getByText(/Pulls both boundaries in by [\d.,]+ m/)).toBeVisible();
+
+    await shrink.check();
+    await dialog.getByRole('button', { name: 'Shrink both apart' }).click();
+
+    await expect(page.locator('article', { hasText: 'overlaps' })).toBeHidden();
+    await expect(page.getByText(/opening a [\d.,]+ m gap/)).toBeVisible();
+
+    await page.keyboard.press('Control+z');
+    await expect(page.locator('article', { hasText: 'overlaps' })).toBeVisible();
+  });
+
+  test('offers no inset when the two are not merely disagreeing about an edge', async ({ page }) => {
+    await page.goto('/');
+    await importFixtures(page);
+    const box = await focusFirstPolygon(page);
+    await page.getByRole('button', { name: 'Combine into one field' }).click();
+    await attributeCell(page, 'client').first().fill('Acme');
+    await attributeCell(page, 'farm').first().fill('Home');
+    await attributeCell(page, 'field').first().fill('West');
+
+    // A polygon drawn straight across the first one is a double-claim, not a survey
+    // disagreement, and shaving metres off both would be the wrong answer to it.
+    await page.getByRole('button', { name: 'Draw', exact: true }).click();
+    await page.getByLabel('Draws into').selectOption('new');
+    const cx = box.x + box.width / 2;
+    const cy = box.y + box.height / 2;
+    await page.mouse.click(cx, cy - 80);
+    await page.mouse.click(cx + 200, cy - 80);
+    await page.mouse.click(cx + 200, cy + 80);
+    await page.mouse.dblclick(cx, cy + 80);
+    await page.keyboard.type('East');
+    await attributeCell(page, 'client').nth(1).fill('Acme');
+    await attributeCell(page, 'farm').nth(1).fill('Home');
+    await page.getByRole('button', { name: 'Show all fields' }).click();
+
+    await page.locator('article', { hasText: 'overlaps' }).getByRole('button', { name: 'Auto-fix' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Resolve overlap' });
+    const shrink = dialog.getByRole('radio', { name: /Shrink both apart/ });
+    await expect(shrink).toBeDisabled();
+    await expect(dialog.getByText(/real double-claim/)).toBeVisible();
+  });
+
+  test('settles every overlap in a batch by trimming the larger field', async ({ page }) => {
+    await page.goto('/');
+    await importNeighbours(page);
+
+    // The bulk bar takes the same route without opening the dialog at all.
+    await page
+      .locator('article', { hasText: 'overlaps' })
+      .getByRole('checkbox', { name: 'Select this issue for a bulk action' })
+      .check();
+    await page.getByRole('button', { name: 'Auto-fix 1' }).click();
+
+    await expect(page.getByText(/trimmed out of the larger field/)).toBeVisible();
+    await expect(page.locator('article', { hasText: 'overlaps' })).toBeHidden();
+  });
+});
+
 test.describe('bulk naming', () => {
   /** Imports with the guessed mapping, which names every one of the four polygons. */
   const FIELD_COUNT = 4;

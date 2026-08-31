@@ -19,6 +19,7 @@ import {
   areaM2,
   bboxOf,
   bboxesOverlap,
+  bufferMeters,
   checkValidity,
   differenceGeom,
   feat,
@@ -939,4 +940,165 @@ export function resolveOverlap(
     message: t('fix.clipped') + note,
     ok: true,
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Overlap strategies                                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * How an overlap between two fields is settled.
+ *
+ * `trim-larger` needs no decision from anyone, which is what makes it the one an
+ * unattended bulk run is allowed to use.
+ */
+export type OverlapStrategy = 'trim-larger' | 'trim-chosen' | 'shrink-both';
+
+/** The area of everything filed under one field, in square metres. */
+export function fieldAreaM2(workspace: Workspace, fieldId: FieldId): number {
+  const merged = unionAll(
+    workspace.features.filter((f) => f.fieldId === fieldId).map((f) => f.geometry),
+  );
+  return merged ? areaM2(merged) : 0;
+}
+
+/**
+ * Which of two overlapping fields should give up the shared ground.
+ *
+ * The larger one: losing half a hectare off a hundred barely moves its total, while the
+ * same half hectare off a forty-hectare neighbour is a real dent in what gets planted.
+ * A tie falls to the first, so the answer never depends on the order they were checked.
+ */
+export function largerOf(workspace: Workspace, a: FieldId, b: FieldId): FieldId {
+  return fieldAreaM2(workspace, b) > fieldAreaM2(workspace, a) ? b : a;
+}
+
+/** Deepest inset the search will consider, and the step it rounds up to. */
+export const MAX_INSET_M = 10;
+const INSET_STEP_M = 0.1;
+/** Slack for arithmetic noise: a square decimetre of leftover is not an overlap. */
+const CLEARED_M2 = 0.05;
+
+/**
+ * The shallowest inset, in metres, that pulls two overlapping boundaries apart when it
+ * is applied to both.
+ *
+ * Shrinking both by `d` opens the strip between them by `2d`, so an edge disagreement of
+ * a metre or two clears at well under a metre each. Anything needing more than
+ * `MAX_INSET_M` is not two surveys disagreeing about a fence line — it is a real
+ * double-claim, and shaving ten metres off both fields would be the wrong answer to it,
+ * so the search gives up and says so.
+ */
+export function minimalInset(a: PolyGeom, b: PolyGeom): number | null {
+  const cleared = (inset: number): boolean => {
+    const shrunkA = bufferMeters(a, -inset);
+    const shrunkB = bufferMeters(b, -inset);
+    if (!shrunkA || !shrunkB) return false;
+    return overlapAreaM2(shrunkA, shrunkB) <= CLEARED_M2;
+  };
+
+  if (!cleared(MAX_INSET_M)) return null;
+
+  let low = 0;
+  let high = MAX_INSET_M;
+  // Seven halvings take a ten-metre bracket under the tenth of a metre the answer is
+  // rounded to, so the last step is the rounding rather than the search.
+  for (let i = 0; i < 7; i++) {
+    const mid = (low + high) / 2;
+    if (cleared(mid)) high = mid;
+    else low = mid;
+  }
+
+  const answer = Math.ceil(high / INSET_STEP_M) * INSET_STEP_M;
+  return Math.min(MAX_INSET_M, Math.round(answer * 10) / 10);
+}
+
+/**
+ * Pulls two overlapping fields apart by insetting both, rather than making one of them
+ * pay for the whole disagreement.
+ *
+ * Only the polygons actually caught in the overlap are moved. Insetting the rest would
+ * open gaps inside a field between members that were never in dispute.
+ */
+export function shrinkApart(
+  workspace: Workspace,
+  aId: FieldId,
+  bId: FieldId,
+  t: Translator = ambientT(),
+): FixOutcome {
+  const result = computeShrink(workspace, aId, bId);
+  if (result === 'no-geometry') return { workspace, message: t('fix.noKeeper'), ok: false };
+  if (result === 'no-overlap') return { workspace, message: t('fix.noOverlap'), ok: false };
+  if (result === 'too-deep') {
+    return { workspace, message: t('fix.insetTooDeep', { max: MAX_INSET_M }), ok: false };
+  }
+  return {
+    workspace: result.workspace,
+    message: t('fix.shrunkApart', {
+      inset: formatNum(result.inset, 1),
+      gap: formatNum(result.inset * 2, 1),
+      area: formatHa(result.areaLostM2 / 10_000),
+    }),
+    ok: true,
+  };
+}
+
+export interface ShrinkPreview {
+  /** How far each boundary comes in, in metres. */
+  inset: number;
+  /** The clearance that opens between them — twice the inset. */
+  gap: number;
+  lostHa: number;
+}
+
+/** What `shrinkApart` would cost, for showing before it is committed. */
+export function previewShrinkApart(
+  workspace: Workspace,
+  aId: FieldId,
+  bId: FieldId,
+): ShrinkPreview | null {
+  const result = computeShrink(workspace, aId, bId);
+  if (typeof result === 'string') return null;
+  return {
+    inset: result.inset,
+    gap: result.inset * 2,
+    lostHa: result.areaLostM2 / 10_000,
+  };
+}
+
+type ShrinkFailure = 'no-geometry' | 'no-overlap' | 'too-deep';
+
+function computeShrink(
+  workspace: Workspace,
+  aId: FieldId,
+  bId: FieldId,
+): { workspace: Workspace; inset: number; areaLostM2: number } | ShrinkFailure {
+  const unionFor = (id: FieldId) =>
+    unionAll(workspace.features.filter((f) => f.fieldId === id).map((f) => f.geometry));
+  const a = unionFor(aId);
+  const b = unionFor(bId);
+  if (!a || !b) return 'no-geometry';
+  if (overlapAreaM2(a, b) <= 0) return 'no-overlap';
+
+  const inset = minimalInset(a, b);
+  if (inset === null) return 'too-deep';
+
+  const before = areaM2(a) + areaM2(b);
+  let failed = false;
+  const features = workspace.features.map((feature) => {
+    if (feature.fieldId !== aId && feature.fieldId !== bId) return feature;
+    const other = feature.fieldId === aId ? b : a;
+    if (overlapAreaM2(feature.geometry, other) <= 0) return feature;
+    const shrunk = bufferMeters(feature.geometry, -inset);
+    if (!shrunk) {
+      failed = true;
+      return feature;
+    }
+    return { ...feature, geometry: shrunk };
+  });
+  if (failed) return 'too-deep';
+
+  const next = { ...workspace, features };
+  const after = fieldAreaM2(next, aId) + fieldAreaM2(next, bId);
+  return { workspace: next, inset, areaLostM2: Math.max(0, before - after) };
 }

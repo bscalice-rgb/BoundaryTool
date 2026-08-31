@@ -514,8 +514,26 @@ export const es: Dictionary = {
 
   'overlap.title': 'Resolver superposición',
   'overlap.intro':
-    'Elija qué lote se queda con el área compartida. La superposición se recorta del otro, ' +
-    'dejando los dos lotes contiguos a lo largo de un borde común y sin área contada dos veces.',
+    'Tres salidas para esto. En cualquiera de ellas los dos terminan contiguos — compartiendo ' +
+    'un borde, no compartiendo área.',
+  'overlap.strategy': '¿Cómo resolverlo?',
+  'overlap.noDecision': 'no exige decisión',
+  'overlap.trimLarger': 'Recortar el lote más grande',
+  'overlap.trimLarger.detail':
+    '{field} es el más grande de los dos, con {area} ha, así que cede el área compartida y su ' +
+    'vecino conserva todas las hectáreas que tenía.',
+  'overlap.trimChosen': 'Recortar el lote que yo elija',
+  'overlap.trimChosen.detail':
+    'Elija el lote que se queda con el área compartida. El otro se recorta hasta él.',
+  'overlap.shrinkBoth': 'Encoger ambos',
+  'overlap.shrinkBoth.detail':
+    'Retrae los dos contornos {inset} m, abriendo una separación de {gap} m en el borde en ' +
+    'disputa. Cuesta {area} ha entre los dos.',
+  'overlap.shrinkBoth.measuring': 'Calculando cuánto hay que retraer…',
+  'overlap.shrinkBoth.tooDeep':
+    'Ninguno se libra del otro con menos de {max} m de retracción, así que esto es una ' +
+    'superposición real y no dos mediciones discrepando sobre un alambrado.',
+  'overlap.confirmShrink': 'Encoger ambos',
   'overlap.polygons.one': '1 polígono',
   'overlap.polygons.other': '{count} polígonos',
   'overlap.noClient': 'sin cliente',
@@ -581,6 +599,7 @@ export const es: Dictionary = {
   'action.addField': 'Agregar lote',
   'action.autoFix': 'Corrección: {title}',
   'action.clipOverlap': 'Corrección: recortar superposición',
+  'action.shrinkApart': 'Corrección: encoger ambos',
   'action.smooth': 'Suavizar a {tolerance} m',
 
   'action.autoFixMany': 'Corregir {count} problemas',
@@ -629,8 +648,10 @@ export const es: Dictionary = {
 
   'toast.bulkFixed.one': 'Se corrigió 1 problema.',
   'toast.bulkFixed.other': 'Se corrigieron {count} problemas.',
-  'toast.bulkSkipped.one': ' 1 superposición todavía necesita que usted elija qué lote se queda con el área compartida.',
-  'toast.bulkSkipped.other': ' {count} superposiciones todavía necesitan que usted elija qué lote se queda con el área compartida.',
+  'toast.bulkOverlaps.one': ' 1 superposición se recortó del lote más grande.',
+  'toast.bulkOverlaps.other': ' {count} superposiciones se recortaron del lote más grande.',
+  'toast.bulkSkipped.one': ' 1 contorno duplicado todavía necesita que usted elija qué copia se queda.',
+  'toast.bulkSkipped.other': ' {count} contornos duplicados todavía necesitan que usted elija qué copia se queda.',
   'toast.bulkNothingFixed': 'Ninguno de los problemas seleccionados tiene corrección automática.',
   'toast.bulkReviewed.one': 'Se marcó 1 aviso como revisado.',
   'toast.bulkReviewed.other': 'Se marcaron {count} avisos como revisados.',
@@ -663,6 +684,11 @@ export const es: Dictionary = {
     ' {count} polígonos estaban completamente dentro del lote conservado y se quitaron.',
   'fix.noOverlap': 'No hay nada que recortar: la superposición ya no estaba.',
   'fix.noKeeper': 'El lote que se conserva no tiene geometría.',
+  'fix.shrunkApart':
+    'Retraje los dos contornos {inset} m, abriendo una separación de {gap} m. Se fueron {area} ha entre los dos.',
+  'fix.insetTooDeep':
+    'Nada por debajo de {max} m de retracción separa a estos dos, lo que hace de esto una ' +
+    'superposición real y no una discrepancia de borde. Recorte uno de ellos.',
   'fix.renamed.one': 'Se renombró 1 lote para que cada combinación sea única.',
   'fix.renamed.other': 'Se renombraron {count} lotes para que cada combinación sea única.',
   'fix.shortened.one': 'Se acortó 1 nombre a {limit} caracteres.',

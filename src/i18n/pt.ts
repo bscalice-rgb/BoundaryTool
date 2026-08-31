@@ -521,9 +521,26 @@ export const pt: Dictionary = {
 
   'overlap.title': 'Resolver sobreposição',
   'overlap.intro':
-    'Escolha qual talhão fica com a área compartilhada. A sobreposição é então recortada do ' +
-    'outro, deixando os dois talhões conjugados por uma borda comum e sem área contada duas ' +
-    'vezes.',
+    'Três saídas para isto. Em qualquer uma delas os dois terminam conjugados — dividindo uma ' +
+    'borda, e não dividindo área.',
+  'overlap.strategy': 'Como resolver?',
+  'overlap.noDecision': 'não exige decisão',
+  'overlap.trimLarger': 'Recortar o talhão maior',
+  'overlap.trimLarger.detail':
+    '{field} é o maior dos dois, com {area} ha, então abre mão da área compartilhada e o ' +
+    'vizinho mantém todos os hectares que tinha.',
+  'overlap.trimChosen': 'Recortar um talhão que eu escolher',
+  'overlap.trimChosen.detail':
+    'Escolha o talhão que fica com a área compartilhada. O outro é recortado até ele.',
+  'overlap.shrinkBoth': 'Encolher os dois',
+  'overlap.shrinkBoth.detail':
+    'Recua os dois contornos em {inset} m, abrindo uma folga de {gap} m na divisa em disputa. ' +
+    'Custa {area} ha somando os dois.',
+  'overlap.shrinkBoth.measuring': 'Calculando de quanto precisa ser o recuo…',
+  'overlap.shrinkBoth.tooDeep':
+    'Nenhum dos dois se separa do outro com até {max} m de recuo, então isto é uma sobreposição ' +
+    'de verdade, e não duas medições discordando de uma cerca.',
+  'overlap.confirmShrink': 'Encolher os dois',
   'overlap.polygons.one': '1 polígono',
   'overlap.polygons.other': '{count} polígonos',
   'overlap.noClient': 'sem cliente',
@@ -589,6 +606,7 @@ export const pt: Dictionary = {
   'action.addField': 'Adicionar talhão',
   'action.autoFix': 'Correção: {title}',
   'action.clipOverlap': 'Correção: recortar sobreposição',
+  'action.shrinkApart': 'Correção: encolher os dois',
   'action.smooth': 'Suavizar a {tolerance} m',
 
   'action.autoFixMany': 'Corrigir {count} problemas',
@@ -637,8 +655,10 @@ export const pt: Dictionary = {
 
   'toast.bulkFixed.one': '1 problema corrigido.',
   'toast.bulkFixed.other': '{count} problemas corrigidos.',
-  'toast.bulkSkipped.one': ' 1 sobreposição ainda depende de você escolher qual talhão fica com a área compartilhada.',
-  'toast.bulkSkipped.other': ' {count} sobreposições ainda dependem de você escolher qual talhão fica com a área compartilhada.',
+  'toast.bulkOverlaps.one': ' 1 sobreposição foi recortada do talhão maior.',
+  'toast.bulkOverlaps.other': ' {count} sobreposições foram recortadas do talhão maior.',
+  'toast.bulkSkipped.one': ' 1 contorno duplicado ainda depende de você escolher qual cópia fica.',
+  'toast.bulkSkipped.other': ' {count} contornos duplicados ainda dependem de você escolher qual cópia fica.',
   'toast.bulkNothingFixed': 'Nenhum dos problemas selecionados tem correção automática.',
   'toast.bulkReviewed.one': '1 aviso marcado como revisado.',
   'toast.bulkReviewed.other': '{count} avisos marcados como revisados.',
@@ -671,6 +691,11 @@ export const pt: Dictionary = {
     ' {count} polígonos estavam inteiramente dentro do talhão mantido e foram removidos.',
   'fix.noOverlap': 'Nada a recortar — a sobreposição já havia sumido.',
   'fix.noKeeper': 'O talhão a manter não tem geometria.',
+  'fix.shrunkApart':
+    'Recuei os dois contornos em {inset} m, abrindo uma folga de {gap} m. {area} ha saíram somando os dois.',
+  'fix.insetTooDeep':
+    'Nada abaixo de {max} m de recuo separa os dois, o que faz disto uma sobreposição de verdade ' +
+    'e não uma discordância de divisa. Recorte um deles.',
   'fix.renamed.one': 'Renomeado 1 talhão para que cada combinação seja única.',
   'fix.renamed.other': 'Renomeados {count} talhões para que cada combinação seja única.',
   'fix.shortened.one': '1 nome encurtado para {limit} caracteres.',

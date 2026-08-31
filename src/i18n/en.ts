@@ -503,8 +503,26 @@ export const en = {
 
   'overlap.title': 'Resolve overlap',
   'overlap.intro':
-    'Choose which field keeps the shared area. The overlap is then clipped out of the other ' +
-    'one, leaving the two fields conjoined along a shared edge with no double-counted area.',
+    'Three ways out of this. Whichever you take, the two end up conjoined — sharing an edge ' +
+    'rather than sharing area.',
+  'overlap.strategy': 'How should this be settled?',
+  'overlap.noDecision': 'no decision needed',
+  'overlap.trimLarger': 'Trim the larger field',
+  'overlap.trimLarger.detail':
+    '{field} is the larger of the two at {area} ha, so it gives up the shared ground and its ' +
+    'neighbour keeps every hectare it had.',
+  'overlap.trimChosen': 'Trim a field I choose',
+  'overlap.trimChosen.detail':
+    'Pick the field that keeps the shared area. The other is clipped back to it.',
+  'overlap.shrinkBoth': 'Shrink both apart',
+  'overlap.shrinkBoth.detail':
+    'Pulls both boundaries in by {inset} m, opening a {gap} m gap along the disputed edge. ' +
+    'Costs {area} ha across the two.',
+  'overlap.shrinkBoth.measuring': 'Working out how deep the inset has to be…',
+  'overlap.shrinkBoth.tooDeep':
+    'Neither comes free of the other under {max} m of inset, so this is a real double-claim ' +
+    'rather than two surveys disagreeing about a fence line.',
+  'overlap.confirmShrink': 'Shrink both apart',
   'overlap.polygons.one': '1 polygon',
   'overlap.polygons.other': '{count} polygons',
   'overlap.noClient': 'no client',
@@ -569,6 +587,7 @@ export const en = {
   'action.addField': 'Add field',
   'action.autoFix': 'Auto-fix: {title}',
   'action.clipOverlap': 'Auto-fix: clip overlap',
+  'action.shrinkApart': 'Auto-fix: shrink apart',
   'action.smooth': 'Smooth at {tolerance} m',
 
   'action.autoFixMany': 'Auto-fix {count} issues',
@@ -616,8 +635,10 @@ export const en = {
 
   'toast.bulkFixed.one': 'Fixed 1 issue.',
   'toast.bulkFixed.other': 'Fixed {count} issues.',
-  'toast.bulkSkipped.one': ' 1 overlap still needs you to choose which field keeps the shared area.',
-  'toast.bulkSkipped.other': ' {count} overlaps still need you to choose which field keeps the shared area.',
+  'toast.bulkOverlaps.one': ' 1 overlap was trimmed out of the larger field.',
+  'toast.bulkOverlaps.other': ' {count} overlaps were trimmed out of the larger field.',
+  'toast.bulkSkipped.one': ' 1 duplicate boundary still needs you to choose which copy stays.',
+  'toast.bulkSkipped.other': ' {count} duplicate boundaries still need you to choose which copy stays.',
   'toast.bulkNothingFixed': 'None of the selected issues has an automatic fix.',
   'toast.bulkReviewed.one': 'Marked 1 warning reviewed.',
   'toast.bulkReviewed.other': 'Marked {count} warnings reviewed.',
@@ -650,6 +671,11 @@ export const en = {
     ' {count} polygons were fully inside the kept field and were removed.',
   'fix.noOverlap': 'Nothing to clip — the overlap had already gone.',
   'fix.noKeeper': 'The field to keep has no geometry.',
+  'fix.shrunkApart':
+    'Pulled both boundaries in by {inset} m, opening a {gap} m gap. {area} ha came off across the two.',
+  'fix.insetTooDeep':
+    'Nothing under {max} m of inset separates these two, which makes it a real double-claim ' +
+    'rather than an edge disagreement. Trim one of them instead.',
   'fix.renamed.one': 'Renamed 1 field so each combination is unique.',
   'fix.renamed.other': 'Renamed {count} fields so each combination is unique.',
   'fix.shortened.one': 'Shortened 1 name to {limit} characters.',

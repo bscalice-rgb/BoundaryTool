@@ -133,9 +133,10 @@ call anything.
    problem, so forty slivers can be dealt with as one job rather than in amongst
    everything else — tick them (or tick the section header to take the lot) and
    **Auto-fix** or **Mark reviewed** applies to the whole batch. A bulk fix is a single
-   history entry, so one Ctrl+Z puts all of it back. Overlaps are the one thing a batch
-   will not touch: which field keeps the shared area is a decision, and the run says how
-   many it left for you. Some things are not worth fixing, so the same ticks also carry
+   history entry, so one Ctrl+Z puts all of it back. Overlaps go through in a batch too,
+   settled by the rule that needs nobody — the larger field gives up the shared ground —
+   and the run says how many it trimmed. Two copies of one boundary are the one thing a
+   batch will not touch, because that ends in a field being deleted. Some things are not worth fixing, so the same ticks also carry
    **Delete N fields**: the fields those issues are about, gone with their polygons, on
    the same confirmation and the same single undo as the field list's own bulk delete. A warning you have looked at and are happy with can be
    marked reviewed: it drops out of the working list into a collapsed "reviewed" section,
@@ -198,7 +199,7 @@ row. Features that belong to no field are not exported, and the quality panel sa
 | Missing `Client` / `Farm` / `Field` | yes | none — jumps to the empty cell |
 | Field with no polygons assigned | yes | delete the row — and several at once from the panel |
 | Self-intersecting or invalid geometry | yes | un-kink and re-merge the outline |
-| Two fields overlapping | yes | you pick which field keeps the shared area; it is clipped out of the other |
+| Two fields overlapping | yes | three routes: trim the larger, trim one you pick, or shrink both apart |
 | The same boundary twice | yes | you pick which to keep; the other field and its polygons go |
 | Duplicate `Client`/`Farm`/`Field` | yes | number the surplus apart, or combine them if they are one field |
 | A name longer than 30 characters | yes | trim at a word boundary, then keep the results distinct |
@@ -225,6 +226,31 @@ out by hand. Anything that survives neither — Cyrillic, CJK — is dropped rat
 guessed at, because no invented transliteration would be recognisable to the grower whose
 field it is. Two names that differed only by an accent become one name once folded, so the
 fix numbers them apart, exactly as the length fix does.
+
+### Three ways out of an overlap
+
+Fields must not overlap, but *why* two of them do decides what should happen. The
+auto-fix offers three routes and defaults to the first:
+
+**Trim the larger field.** The larger of the two gives up the shared ground and its
+neighbour keeps every hectare it had. Losing half a hectare off a hundred barely moves
+that field's total, while the same half hectare off its forty-hectare neighbour is a real
+dent in what gets planted. Nobody has to decide anything, which is why this is also the
+route a bulk **Auto-fix** takes on its own.
+
+**Trim a field you pick.** The original route, for when you know which survey is the
+right one. The chosen field keeps the shared area and the other is clipped back to it.
+
+**Shrink both apart.** Where the two are really one fence line surveyed twice, making
+either side pay the whole difference is arbitrary. This pulls both boundaries in by the
+same amount and leaves a gap between them instead of a shared edge. The inset is not a
+setting to guess at: the tool searches for the shallowest one that actually parts the two,
+usually well under a metre each for an ordinary edge disagreement, and reports the inset,
+the gap it opens and the hectares it costs before you commit. Only the polygons caught in
+the overlap move — insetting the rest of a multi-polygon field would open gaps inside it
+between members that were never in dispute. If nothing under 10 m of inset separates the
+two, the route is refused: that is a real double-claim, not a disagreement about a fence,
+and shaving ten metres off both fields would be the wrong answer to it.
 
 There is a second kind of duplicate, about the geometry rather than the name: two fields
 covering the same ground. Any shared area at all is an overlap, but once two fields share

@@ -387,6 +387,25 @@ export function simplifyMeters(geometry: PolyGeom, toleranceMeters: number): Pol
   });
 }
 
+/**
+ * Grows or shrinks a boundary by a distance in metres. A negative distance insets it.
+ *
+ * Turf buffers through an azimuthal equidistant projection centred on the geometry, so
+ * the metres are true metres at any latitude. An inset deep enough to consume the
+ * polygon returns null rather than an empty shape.
+ */
+export function bufferMeters(geometry: PolyGeom, meters: number): PolyGeom | null {
+  if (meters === 0) return geometry;
+  try {
+    const out = buffer(feat(geometry), meters, { units: 'meters', steps: 8 });
+    if (!out?.geometry) return null;
+    const result = normalize(out.geometry as PolyGeom);
+    return result && areaM2(result) > 0 ? result : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Perimeter of every ring, in metres. */
 export function perimeterMeters(geometry: PolyGeom): number {
   const [lon0, lat0] = centerOf(geometry);

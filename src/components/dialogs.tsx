@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import type { Position } from 'geojson';
 import type { WField, Workspace } from '../types';
 import { useT } from '../i18n';
@@ -19,7 +20,9 @@ import {
   readSource,
 } from '../lib/import';
 import type { ExportBlockers, ExportPlan } from '../lib/export';
-import { describeField } from '../lib/qa';
+import type { OverlapStrategy, ShrinkPreview } from '../lib/qa';
+import { MAX_INSET_M, describeField, fieldAreaM2, largerOf, previewShrinkApart } from '../lib/qa';
+import { formatHa, formatNum } from '../lib/geo';
 import { Button, Modal } from './ui';
 
 /* -------------------------------------------------------------------------- */
@@ -395,74 +398,225 @@ export function OverlapDialog({
   /** True when the two are the same boundary twice, so one of them simply goes. */
   duplicate: boolean;
   workspace: Workspace;
-  onResolve: (keeperId: string, loserId: string) => void;
+  onResolve: (strategy: OverlapStrategy, keeperId: string, loserId: string) => void;
   onCancel: () => void;
 }) {
   const t = useT();
   const [keeperId, setKeeperId] = useState(fields[0].id);
+  const [strategy, setStrategy] = useState<OverlapStrategy>('trim-larger');
   const loser = fields.find((field) => field.id !== keeperId)!;
 
-  return (
-    <Modal
-      title={t(duplicate ? 'overlap.duplicateTitle' : 'overlap.title')}
-      onClose={onCancel}
-      width="max-w-md"
-    >
-      <p className="text-xs leading-relaxed text-ink-300">
-        {t(duplicate ? 'overlap.duplicateIntro' : 'overlap.intro')}
-      </p>
+  const largerId = useMemo(
+    () => largerOf(workspace, fields[0].id, fields[1].id),
+    [workspace, fields],
+  );
+  const larger = fields.find((field) => field.id === largerId)!;
+  const smaller = fields.find((field) => field.id !== largerId)!;
 
-      <div className="mt-3 space-y-1.5">
-        {fields.map((field) => (
-          <label
-            key={field.id}
-            className={`flex cursor-pointer items-start gap-2.5 rounded-md border p-2.5
-              ${
-                keeperId === field.id
-                  ? 'border-crop-400 bg-crop-500/10'
-                  : 'border-ink-700 hover:border-ink-600'
-              }`}
-          >
-            <input
-              type="radio"
+  // Working out the inset means buffering both boundaries half a dozen times, which on a
+  // heavily digitised field is a visible pause. It runs after the dialog has painted so
+  // the other two routes are usable while it settles.
+  const [preview, setPreview] = useState<ShrinkPreview | null | 'pending'>('pending');
+  useEffect(() => {
+    setPreview('pending');
+    const frame = requestAnimationFrame(() =>
+      setPreview(previewShrinkApart(workspace, fields[0].id, fields[1].id)),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [workspace, fields]);
+
+  const fieldRow = (field: WField) => (
+    <span className="min-w-0">
+      <span className="block text-xs font-medium text-ink-100">{describeField(field, t)}</span>
+      <span className="block text-[11px] text-ink-400">
+        {t.n('overlap.polygons', workspace.features.filter((f) => f.fieldId === field.id).length)}
+        {' · '}
+        {field.client || t('overlap.noClient')}
+      </span>
+    </span>
+  );
+
+  /* The same boundary twice is not a disagreement to settle; one copy simply goes. */
+  if (duplicate) {
+    return (
+      <Modal title={t('overlap.duplicateTitle')} onClose={onCancel} width="max-w-md">
+        <p className="text-xs leading-relaxed text-ink-300">{t('overlap.duplicateIntro')}</p>
+
+        <div className="mt-3 space-y-1.5">
+          {fields.map((field) => (
+            <Choice
+              key={field.id}
               name="keeper"
               checked={keeperId === field.id}
-              onChange={() => setKeeperId(field.id)}
-              className="mt-0.5 h-3.5 w-3.5 accent-crop-500"
-            />
+              onSelect={() => setKeeperId(field.id)}
+            >
+              {fieldRow(field)}
+            </Choice>
+          ))}
+        </div>
+
+        <p className="mt-3 text-[11px] text-red-300">
+          {t('overlap.duplicateLoses', { field: describeField(loser, t) })}
+        </p>
+
+        <div className="mt-4 flex justify-end gap-2">
+          <Button onClick={onCancel}>{t('import.cancel')}</Button>
+          <Button tone="danger" onClick={() => onResolve('trim-chosen', keeperId, loser.id)}>
+            {t('overlap.duplicateConfirm')}
+          </Button>
+        </div>
+      </Modal>
+    );
+  }
+
+  const shrinkable = preview !== null && preview !== 'pending';
+  const resolve = () => {
+    if (strategy === 'trim-larger') onResolve(strategy, smaller.id, larger.id);
+    else if (strategy === 'shrink-both') onResolve(strategy, fields[0].id, fields[1].id);
+    else onResolve(strategy, keeperId, loser.id);
+  };
+
+  return (
+    <Modal title={t('overlap.title')} onClose={onCancel} width="max-w-md">
+      <p className="text-xs leading-relaxed text-ink-300">{t('overlap.intro')}</p>
+
+      <fieldset className="mt-3">
+        <legend className="text-[11px] font-semibold text-ink-100">
+          {t('overlap.strategy')}
+        </legend>
+
+        <div className="mt-2 space-y-1.5">
+          <Choice
+            name="strategy"
+            checked={strategy === 'trim-larger'}
+            onSelect={() => setStrategy('trim-larger')}
+          >
             <span className="min-w-0">
-              <span className="block text-xs font-medium text-ink-100">
-                {describeField(field, t)}
+              <span className="flex items-center gap-2">
+                <span className="text-xs font-medium text-ink-100">
+                  {t('overlap.trimLarger')}
+                </span>
+                <span className="shrink-0 rounded-full bg-crop-500/20 px-1.5 text-[9px]
+                  font-semibold uppercase tracking-wide text-crop-200">
+                  {t('overlap.noDecision')}
+                </span>
               </span>
-              <span className="block text-[11px] text-ink-400">
-                {t.n(
-                  'overlap.polygons',
-                  workspace.features.filter((f) => f.fieldId === field.id).length,
-                )}
-                {' · '}
-                {field.client || t('overlap.noClient')}
+              <span className="mt-0.5 block text-[11px] leading-relaxed text-ink-400">
+                {t('overlap.trimLarger.detail', {
+                  field: describeField(larger, t),
+                  area: formatHa(fieldAreaM2(workspace, larger.id) / 10_000),
+                })}
               </span>
             </span>
-          </label>
-        ))}
-      </div>
+          </Choice>
 
-      <p className={`mt-3 text-[11px] ${duplicate ? 'text-red-300' : 'text-ink-400'}`}>
-        {t(duplicate ? 'overlap.duplicateLoses' : 'overlap.loses', {
-          field: describeField(loser, t),
-        })}
-      </p>
+          <Choice
+            name="strategy"
+            checked={strategy === 'trim-chosen'}
+            onSelect={() => setStrategy('trim-chosen')}
+          >
+            <span className="min-w-0">
+              <span className="block text-xs font-medium text-ink-100">
+                {t('overlap.trimChosen')}
+              </span>
+              <span className="mt-0.5 block text-[11px] leading-relaxed text-ink-400">
+                {t('overlap.trimChosen.detail')}
+              </span>
+            </span>
+          </Choice>
+
+          {strategy === 'trim-chosen' && (
+            <div className="ml-6 space-y-1.5">
+              {fields.map((field) => (
+                <Choice
+                  key={field.id}
+                  name="keeper"
+                  checked={keeperId === field.id}
+                  onSelect={() => setKeeperId(field.id)}
+                >
+                  {fieldRow(field)}
+                </Choice>
+              ))}
+              <p className="text-[11px] text-ink-400">
+                {t('overlap.loses', { field: describeField(loser, t) })}
+              </p>
+            </div>
+          )}
+
+          <Choice
+            name="strategy"
+            checked={strategy === 'shrink-both'}
+            disabled={!shrinkable}
+            onSelect={() => setStrategy('shrink-both')}
+          >
+            <span className="min-w-0">
+              <span className="block text-xs font-medium text-ink-100">
+                {t('overlap.shrinkBoth')}
+              </span>
+              <span className="mt-0.5 block text-[11px] leading-relaxed text-ink-400">
+                {preview === 'pending'
+                  ? t('overlap.shrinkBoth.measuring')
+                  : preview === null
+                    ? t('overlap.shrinkBoth.tooDeep', { max: MAX_INSET_M })
+                    : t('overlap.shrinkBoth.detail', {
+                        inset: formatNum(preview.inset, 1),
+                        gap: formatNum(preview.gap, 1),
+                        area: formatHa(preview.lostHa),
+                      })}
+              </span>
+            </span>
+          </Choice>
+        </div>
+      </fieldset>
 
       <div className="mt-4 flex justify-end gap-2">
         <Button onClick={onCancel}>{t('import.cancel')}</Button>
         <Button
-          tone={duplicate ? 'danger' : 'primary'}
-          onClick={() => onResolve(keeperId, loser.id)}
+          tone="primary"
+          disabled={strategy === 'shrink-both' && !shrinkable}
+          onClick={resolve}
         >
-          {t(duplicate ? 'overlap.duplicateConfirm' : 'overlap.confirm')}
+          {t(strategy === 'shrink-both' ? 'overlap.confirmShrink' : 'overlap.confirm')}
         </Button>
       </div>
     </Modal>
+  );
+}
+
+/** A radio dressed as a card, which is how every choice in this dialog is presented. */
+function Choice({
+  name,
+  checked,
+  disabled,
+  onSelect,
+  children,
+}: {
+  name: string;
+  checked: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <label
+      className={`flex items-start gap-2.5 rounded-md border p-2.5
+        ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}
+        ${
+          checked
+            ? 'border-crop-400 bg-crop-500/10'
+            : 'border-ink-700 hover:border-ink-600'
+        }`}
+    >
+      <input
+        type="radio"
+        name={name}
+        checked={checked}
+        disabled={disabled}
+        onChange={onSelect}
+        className="mt-0.5 h-3.5 w-3.5 accent-crop-500"
+      />
+      {children}
+    </label>
   );
 }
 

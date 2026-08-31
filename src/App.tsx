@@ -39,6 +39,7 @@ import {
 } from './lib/import';
 import { areaHa, bboxOf, simplifyMeters, splitByLine, vertexCount } from './lib/geo';
 import { formatLatLon } from './lib/coords';
+import type { OverlapStrategy } from './lib/qa';
 import {
   autoAsciiNames,
   autoDeleteFields,
@@ -47,9 +48,11 @@ import {
   autoShortenNames,
   autoSimplify,
   autoUniquifyNames,
+  largerOf,
   resolveOverlap,
   reviewKey,
   runChecks,
+  shrinkApart,
 } from './lib/qa';
 import {
   type ExportBlockers,
@@ -535,14 +538,25 @@ export default function App() {
   /* -------------------------------------------------------------- QA fixes */
 
   /**
-   * Runs one flag's programmatic correction against a given workspace. Overlaps are the
-   * exception: which field keeps the shared area is a judgement the tool will not make,
-   * so those return null and are dealt with through the dialog instead.
+   * Runs one flag's programmatic correction against a given workspace.
+   *
+   * An overlap settles itself here by the rule that needs nobody: the larger field gives
+   * up the shared ground, because losing half a hectare off a hundred barely moves the
+   * total while the same half hectare off its forty-hectare neighbour is a real dent.
+   * The other two routes are decisions, and decisions go through the dialog.
    */
   const applyAutoFix = useCallback(
     (current: Workspace, flag: QAFlag) => {
       const spec = flag.autoFix;
-      if (!spec || spec.kind === 'resolve-overlap') return null;
+      if (!spec) return null;
+      if (spec.kind === 'resolve-overlap') {
+        // The same boundary twice ends in a field being deleted, which is not a call an
+        // unattended run gets to make.
+        if (flag.kind !== 'overlap' || flag.fieldIds.length !== 2) return null;
+        const [first, second] = flag.fieldIds;
+        const larger = largerOf(current, first, second);
+        return resolveOverlap(current, larger === first ? second : first, larger, t);
+      }
       switch (spec.kind) {
         case 'unkink':
           return autoFixGeometry(current, flag.featureIds, t);
@@ -600,29 +614,33 @@ export default function App() {
     (flags: QAFlag[]) => {
       let next = workspace;
       let fixed = 0;
-      let overlaps = 0;
+      let trimmed = 0;
+      let undecided = 0;
       for (const flag of flags) {
-        if (flag.autoFix?.kind === 'resolve-overlap') {
-          overlaps += 1;
-          continue;
-        }
         // Each fix runs against the result of the last, so flags that overlap in the
         // features they touch settle in order instead of fighting each other.
         const outcome = applyAutoFix(next, flag);
-        if (outcome?.ok) {
-          next = outcome.workspace;
-          fixed += 1;
+        if (!outcome) {
+          if (flag.autoFix?.kind === 'resolve-overlap') undecided += 1;
+          continue;
         }
+        if (!outcome.ok) continue;
+        next = outcome.workspace;
+        if (flag.kind === 'overlap') trimmed += 1;
+        else fixed += 1;
       }
 
-      const skipped = overlaps > 0 ? t.n('toast.bulkSkipped', overlaps) : '';
-      if (fixed === 0) {
-        toast(overlaps > 0 ? skipped.trim() : t('toast.bulkNothingFixed'), 'error');
+      const skipped = undecided > 0 ? t.n('toast.bulkSkipped', undecided) : '';
+      if (fixed + trimmed === 0) {
+        toast(undecided > 0 ? skipped.trim() : t('toast.bulkNothingFixed'), 'error');
         return;
       }
       setActiveFlagId(null);
-      apply(t('action.autoFixMany', { count: fixed }), () => next);
-      toast(t('toast.undoHint', { message: t.n('toast.bulkFixed', fixed) }) + skipped);
+      apply(t('action.autoFixMany', { count: fixed + trimmed }), () => next);
+      const done =
+        (fixed > 0 ? t.n('toast.bulkFixed', fixed) : '') +
+        (trimmed > 0 ? t.n('toast.bulkOverlaps', trimmed) : '');
+      toast(t('toast.undoHint', { message: done.trim() }) + skipped);
     },
     [apply, applyAutoFix, workspace, toast, t],
   );
@@ -690,18 +708,25 @@ export default function App() {
     [workspace.fields, zoomTo],
   );
 
+  /**
+   * Settles one overlap the way the dialog was told to.
+   *
+   * For the two trimming routes `keepId` is the field that keeps the shared ground and
+   * `changeId` is the one clipped back off it; shrinking apart moves both, so there the
+   * two are just the pair.
+   */
   const handleResolveOverlap = useCallback(
-    (keeperId: string, loserId: string) => {
+    (strategy: OverlapStrategy, keepId: string, changeId: string) => {
       const duplicate = overlapPair?.duplicate ?? false;
       setOverlapPair(null);
 
       // The same choice, two different answers: neighbours that disagree about an edge
       // want the shared area clipped; the same field twice wants one of them gone.
       if (duplicate) {
-        const loser = workspace.fields.find((field) => field.id === loserId);
+        const loser = workspace.fields.find((field) => field.id === changeId);
         // The copy goes entirely: its row and the polygons under it. Keeping the
         // polygons would leave the same ground on the map twice, ungrouped.
-        apply(t('action.clipOverlap'), (current) => deleteField(current, loserId, true));
+        apply(t('action.clipOverlap'), (current) => deleteField(current, changeId, true));
         toast(
           t('toast.undoHint', {
             message: t('fix.duplicateDeleted', {
@@ -712,12 +737,16 @@ export default function App() {
         return;
       }
 
-      const outcome = resolveOverlap(workspace, keeperId, loserId, t);
+      const outcome =
+        strategy === 'shrink-both'
+          ? shrinkApart(workspace, keepId, changeId, t)
+          : resolveOverlap(workspace, keepId, changeId, t);
       if (!outcome.ok) {
         toast(outcome.message, 'error');
         return;
       }
-      apply(t('action.clipOverlap'), () => outcome.workspace);
+      const label = strategy === 'shrink-both' ? 'action.shrinkApart' : 'action.clipOverlap';
+      apply(t(label), () => outcome.workspace);
       toast(t('toast.undoHint', { message: outcome.message }));
     },
     [apply, workspace, overlapPair, toast, t],

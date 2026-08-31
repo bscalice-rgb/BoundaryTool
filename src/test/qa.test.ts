@@ -7,12 +7,16 @@ import {
   autoDeleteFields,
   autoFixGeometry,
   autoSimplify,
+  largerOf,
+  minimalInset,
   namingProblem,
+  previewShrinkApart,
   protrusionShare,
   resolveOverlap,
   runChecks,
+  shrinkApart,
 } from '../lib/qa';
-import { areaHa, checkValidity, vertexCount } from '../lib/geo';
+import { areaHa, areaM2, checkValidity, overlapAreaM2, unionAll, vertexCount } from '../lib/geo';
 import { combineIntoField, deleteFeatures, newFeature, newField, updateField } from '../state/ops';
 import { poly, squareRing } from './fixtures';
 
@@ -137,6 +141,128 @@ describe('overlapping fields', () => {
     });
     // No gap and no overlap: the parts sum to the whole.
     expect(combined).toBeCloseTo(keeperArea + loserArea, 6);
+  });
+
+  /* -- The two automatic routes out of an overlap ------------------------- */
+
+  /** Metres expressed as longitude degrees at the latitude these fixtures sit at. */
+  const asDegrees = (metres: number) => metres / (111_320 * Math.cos((48.8 * Math.PI) / 180));
+
+  /**
+   * Two neighbouring fields whose shared edge was surveyed twice and disagrees by
+   * `overlapM` metres — the ordinary case, as opposed to a real double-claim.
+   */
+  function edgeDisagreement(overlapM: number, widthB = 0.004): Workspace {
+    const a = newField({ client: 'A', farm: 'B', field: 'West' });
+    const b = newField({ client: 'A', farm: 'B', field: 'East' });
+    const start = 2.5 + 0.004 - asDegrees(overlapM);
+    return {
+      fields: [a, b],
+      features: [
+        { ...newFeature(poly([squareRing(2.5, 48.8, 0.004)]), 'a.geojson'), fieldId: a.id },
+        { ...newFeature(poly([squareRing(start, 48.8, widthB)]), 'b.geojson'), fieldId: b.id },
+      ],
+    };
+  }
+
+  it('names the larger field as the one to give up the shared ground', () => {
+    const workspace = edgeDisagreement(3, 0.002);
+    const [big, small] = workspace.fields;
+    expect(areaHa(workspace.features[0].geometry)).toBeGreaterThan(
+      areaHa(workspace.features[1].geometry),
+    );
+    // Asked either way round, the answer is the same field.
+    expect(largerOf(workspace, big.id, small.id)).toBe(big.id);
+    expect(largerOf(workspace, small.id, big.id)).toBe(big.id);
+  });
+
+  it('trims the larger field and leaves the smaller one whole', () => {
+    const workspace = edgeDisagreement(3, 0.002);
+    const [big, small] = workspace.fields;
+    const smallBefore = areaHa(workspace.features[1].geometry);
+
+    const larger = largerOf(workspace, big.id, small.id);
+    const outcome = resolveOverlap(workspace, larger === big.id ? small.id : big.id, larger);
+
+    expect(outcome.ok).toBe(true);
+    expect(runChecks(outcome.workspace).map((f) => f.kind)).not.toContain('overlap');
+    expect(areaHa(outcome.workspace.features[1].geometry)).toBeCloseTo(smallBefore, 6);
+    expect(areaHa(outcome.workspace.features[0].geometry)).toBeLessThan(
+      areaHa(workspace.features[0].geometry),
+    );
+  });
+
+  it('finds the shallowest inset that parts two boundaries', () => {
+    const workspace = edgeDisagreement(3);
+    const [a, b] = workspace.features.map((f) => f.geometry);
+    const inset = minimalInset(a, b);
+
+    // Both sides move, so a three-metre disagreement needs about a metre and a half each.
+    expect(inset).not.toBeNull();
+    expect(inset!).toBeGreaterThan(1.4);
+    expect(inset!).toBeLessThan(2.1);
+  });
+
+  it('refuses to shave a real double-claim apart', () => {
+    // The stock fixture overlaps by about 150 m — no inset worth applying fixes that.
+    const workspace = overlapping();
+    const [a, b] = workspace.features.map((f) => f.geometry);
+    expect(minimalInset(a, b)).toBeNull();
+
+    const outcome = shrinkApart(workspace, workspace.fields[0].id, workspace.fields[1].id);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.workspace).toEqual(workspace);
+    expect(previewShrinkApart(workspace, workspace.fields[0].id, workspace.fields[1].id)).toBeNull();
+  });
+
+  it('shrinks both fields apart, leaving a gap rather than a shared edge', () => {
+    const workspace = edgeDisagreement(3);
+    const [a, b] = workspace.fields;
+    const before = workspace.features.map((f) => areaM2(f.geometry));
+
+    const outcome = shrinkApart(workspace, a.id, b.id);
+    expect(outcome.ok).toBe(true);
+    expect(runChecks(outcome.workspace).map((f) => f.kind)).not.toContain('overlap');
+
+    const [afterA, afterB] = outcome.workspace.features.map((f) => f.geometry);
+    // Both gave ground, not just one of them.
+    expect(areaM2(afterA)).toBeLessThan(before[0]);
+    expect(areaM2(afterB)).toBeLessThan(before[1]);
+    expect(overlapAreaM2(afterA, afterB)).toBeLessThanOrEqual(0.05);
+
+    // And they are genuinely apart: the union covers more than the two do end to end
+    // would if they still touched.
+    const merged = unionAll([afterA, afterB])!;
+    expect(merged.type).toBe('MultiPolygon');
+  });
+
+  it('reports what shrinking would cost before it is committed', () => {
+    const workspace = edgeDisagreement(3);
+    const [a, b] = workspace.fields;
+    const preview = previewShrinkApart(workspace, a.id, b.id);
+
+    expect(preview).not.toBeNull();
+    expect(preview!.gap).toBeCloseTo(preview!.inset * 2, 6);
+    expect(preview!.lostHa).toBeGreaterThan(0);
+    // The same numbers the fix goes on to use.
+    expect(shrinkApart(workspace, a.id, b.id).message).toContain(String(preview!.inset));
+  });
+
+  it('leaves a bystander field alone while shrinking two others apart', () => {
+    const workspace = edgeDisagreement(3);
+    const other = newField({ client: 'A', farm: 'B', field: 'Far' });
+    const bystander = {
+      ...newFeature(poly([squareRing(2.6, 48.9, 0.004)]), 'c.geojson'),
+      fieldId: other.id,
+    };
+    const withThird: Workspace = {
+      fields: [...workspace.fields, other],
+      features: [...workspace.features, bystander],
+    };
+
+    const outcome = shrinkApart(withThird, workspace.fields[0].id, workspace.fields[1].id);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.workspace.features[2].geometry).toBe(bystander.geometry);
   });
 
   it('ignores hairline overlaps below the noise threshold', () => {

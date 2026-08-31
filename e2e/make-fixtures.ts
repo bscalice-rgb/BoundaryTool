@@ -95,7 +95,49 @@ export async function writeFixtures(): Promise<void> {
     ),
   );
 
-  // 5. A plain WGS84 GeoJSON.
+  // 5. Two neighbours whose shared edge was surveyed twice and disagrees by three metres:
+  //     a hundred hectares against forty, which is the shape the overlap routes are for.
+  const M_PER_DEG_LAT = 110_574;
+  const mPerDegLon = 111_320 * Math.cos((48.8 * Math.PI) / 180);
+  const metresRing = (lon: number, lat: number, wide: number, tall: number): Position[] => {
+    const dx = wide / mPerDegLon;
+    const dy = tall / M_PER_DEG_LAT;
+    return [
+      [lon, lat],
+      [lon + dx, lat],
+      [lon + dx, lat + dy],
+      [lon, lat + dy],
+      [lon, lat],
+    ];
+  };
+  const bigWide = 1000;
+  const smallWide = 632.5;
+  writeFileSync(
+    join(FIXTURE_DIR, 'neighbours.geojson'),
+    JSON.stringify({
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          properties: { Client: 'Fazenda Boa Vista', Farm: 'Sede', Field: 'Talhao Grande' },
+          geometry: { type: 'Polygon', coordinates: [metresRing(3, 48.8, bigWide, 1000)] },
+        },
+        {
+          type: 'Feature',
+          properties: { Client: 'Fazenda Boa Vista', Farm: 'Sede', Field: 'Talhao Pequeno' },
+          geometry: {
+            type: 'Polygon',
+            // Starts three metres short of where the big one ends.
+            coordinates: [
+              metresRing(3 + (bigWide - 3) / mPerDegLon, 48.8, smallWide, smallWide),
+            ],
+          },
+        },
+      ],
+    }),
+  );
+
+  // 6. A plain WGS84 GeoJSON.
   writeFileSync(
     join(FIXTURE_DIR, 'extra.geojson'),
     JSON.stringify({
