@@ -125,7 +125,11 @@ call anything.
    **Problem** menu narrows the list to one kind of flag — and it is the *same* filter as
    the quality panel's chips, so picking "slivers" in either place narrows both. When the
    last flag of that kind is fixed the filter lets go by itself, rather than leaving two
-   empty panels and no clue why.
+   empty panels and no clue why. Beside it a **File** menu cuts the list down to the
+   fields one of the loaded files brought in, counted per file. A batch of files usually
+   arrives one client per file, and this is what makes that workable: pick the file, tick
+   **Select all**, and give the whole of that client its Client name in one pass before
+   moving to the next file.
 5. **Clean and fix.** The quality panel checks each field and offers two routes for
    every flag: an automatic correction, or a manual one that selects the offending
    geometry and arms the right editing tool. Everything, auto-fixes included, is one
@@ -145,7 +149,7 @@ call anything.
    so it sits outside the undo history — and if the geometry behind a reviewed warning
    changes, the flag comes back to be looked at again.
 6. **Export.** One button produces one `.zip` containing `.shp`, `.shx`, `.dbf`, `.prj`
-   and `.cpg`, in WGS84, with `Client`, `Farm` and `Field` as 30-character text columns.
+   and `.cpg`, in WGS84, with `Client`, `Farm` and `Field` as 60-character text columns.
 
 ## Getting out of your own way
 
@@ -202,16 +206,15 @@ row. Features that belong to no field are not exported, and the quality panel sa
 | Two fields overlapping | yes | three routes: trim the larger, trim one you pick, or shrink both apart |
 | The same boundary twice | yes | you pick which to keep; the other field and its polygons go |
 | Duplicate `Client`/`Farm`/`Field` | yes | number the surplus apart, or combine them if they are one field |
-| A name longer than 30 characters | yes | trim at a word boundary, then keep the results distinct |
+| A name longer than 60 characters | yes | trim at a word boundary, then keep the results distinct |
 | Accented or non-Latin characters | yes | rewrite in plain ASCII, then keep the results distinct |
 | Jagged, over-dense boundaries | no | simplify at a suggested tolerance, with preview |
-| Non-crop area likely included | no | none — a heuristic hint, hand-corrected with the hole-cut tool |
 | Slivers below 0.05 ha | no | delete |
 | Season-specific field name | no | none — warning only |
 
 Three of these checks are about the destination rather than the geometry.
 
-Attributes are written as 30-character text columns, so a longer value is cut off when
+Attributes are written as 60-character text columns, so a longer value is cut off when
 the file is written — and two names cut at the same point become one row on upload. The
 length check stops that happening silently; the auto-fix trims at a word boundary where
 there is one close enough to the end to use, and then makes sure nothing has collided.

@@ -22,6 +22,7 @@ const columnsOf = (mapping: ColumnMapping) => ({
   farm: mapping.farm.column,
   field: mapping.field.column,
 });
+import { NAME_LIMIT } from '../types';
 import { areaHa, bboxOf } from '../lib/geo';
 import { buildShapefile } from '../lib/shapefile';
 import { make7z, makeRar5, member } from './archives';
@@ -375,8 +376,11 @@ describe('choosing which column is which', () => {
     ).toBe('42');
   });
 
-  it('counts values that the 30-character column would shorten', () => {
-    const columns = collectColumns([{ long: 'X'.repeat(31) }, { long: 'short' }]);
+  it('counts values that the attribute column would shorten', () => {
+    const columns = collectColumns([
+      { long: 'X'.repeat(NAME_LIMIT + 1) },
+      { long: 'X'.repeat(NAME_LIMIT) },
+    ]);
     expect(columns[0].tooLong).toBe(1);
   });
 });

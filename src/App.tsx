@@ -697,9 +697,6 @@ export default function App() {
           if (flag.autoFix?.kind === 'simplify') setTolerance(flag.autoFix.toleranceMeters);
           setTool('simplify');
           break;
-        case 'cut-hole':
-          setTool('cut-hole');
-          break;
         case 'review-delete':
           setTool('select');
           break;

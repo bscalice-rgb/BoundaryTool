@@ -575,7 +575,6 @@ const FLAG_LABELS: Record<QAFlag['kind'], StringKey> = {
   'invalid-geometry': 'label.singleZone',
   overlap: 'label.noOverlaps',
   'jagged-edges': 'label.smoothing',
-  'non-crop-area': 'label.cropOnly',
   sliver: 'label.cropOnly',
   naming: 'label.consistentNaming',
   unassigned: 'label.multiPolygon',

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PolyGeom, Workspace } from '../types';
 import {
-  DEFAULT_THRESHOLDS,
   autoAsciiNames,
   autoDeleteFeatures,
   autoDeleteFields,
@@ -11,7 +10,6 @@ import {
   minimalInset,
   namingProblem,
   previewShrinkApart,
-  protrusionShare,
   resolveOverlap,
   runChecks,
   shrinkApart,
@@ -345,42 +343,6 @@ describe('slivers', () => {
     const outcome = autoDeleteFeatures(workspace, flag!.featureIds);
     expect(outcome.workspace.features).toHaveLength(1);
     expect(runChecks(outcome.workspace).map((f) => f.kind)).not.toContain('sliver');
-  });
-});
-
-describe('non-crop area heuristic', () => {
-  it('flags a field with a long thin spur hanging off it', () => {
-    // A block with a 10 m wide, 250 m long track attached along one edge.
-    const spur: PolyGeom = {
-      type: 'Polygon',
-      coordinates: [
-        [
-          [2.5, 48.8],
-          [2.504, 48.8],
-          [2.504, 48.804],
-          [2.5, 48.804],
-          [2.5, 48.8045],
-          [2.5001, 48.8045],
-          [2.5001, 48.807],
-          [2.50005, 48.807],
-          [2.50005, 48.8045],
-          [2.5, 48.8045],
-          [2.5, 48.8],
-        ],
-      ],
-    };
-    const share = protrusionShare(spur, DEFAULT_THRESHOLDS.protrusionWidthM);
-    expect(share).not.toBeNull();
-    expect(share!).toBeGreaterThan(0);
-  });
-
-  it('does not flag a clean rectangular field', () => {
-    const share = protrusionShare(bigSquare(), DEFAULT_THRESHOLDS.protrusionWidthM);
-    expect(share).toBeLessThan(DEFAULT_THRESHOLDS.protrusionAreaShare);
-  });
-
-  it('stays quiet on shapes too small to judge', () => {
-    expect(protrusionShare(poly([squareRing(2.5, 48.8, 0.0001)]), 8)).toBeNull();
   });
 });
 

@@ -46,6 +46,14 @@ export interface Workspace {
 
 export const emptyWorkspace = (): Workspace => ({ features: [], fields: [] });
 
+/**
+ * Character width of the Client, Farm and Field columns, and the single place it is
+ * decided. The export schema, the length check and the attribute inputs all take it
+ * from here; it lives with the data model rather than in a library so that the reader,
+ * the checks and the writer can all reach it without importing each other.
+ */
+export const NAME_LIMIT = 60;
+
 export type FlagSeverity = 'blocking' | 'warning';
 
 export type FlagKind =
@@ -53,7 +61,6 @@ export type FlagKind =
   | 'invalid-geometry'
   | 'overlap'
   | 'jagged-edges'
-  | 'non-crop-area'
   | 'sliver'
   | 'naming'
   | 'unassigned'

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { Position } from 'geojson';
+import { NAME_LIMIT } from '../types';
 import type { WField, Workspace } from '../types';
 import { useT } from '../i18n';
 import { formatLatLon, parseLatLon } from '../lib/coords';
@@ -21,7 +22,13 @@ import {
 } from '../lib/import';
 import type { ExportBlockers, ExportPlan } from '../lib/export';
 import type { OverlapStrategy, ShrinkPreview } from '../lib/qa';
-import { MAX_INSET_M, describeField, fieldAreaM2, largerOf, previewShrinkApart } from '../lib/qa';
+import {
+  MAX_INSET_M,
+  describeField,
+  fieldAreaM2,
+  largerOf,
+  previewShrinkApart,
+} from '../lib/qa';
 import { formatHa, formatNum } from '../lib/geo';
 import { Button, Modal } from './ui';
 
@@ -261,7 +268,7 @@ export function ImportDialog({
                           {t('import.example', { value: preview })}
                           {over && (
                             <span className="text-amber-400">
-                              {t('import.tooLong', { count: preview.length, limit: 30 })}
+                              {t('import.tooLong', { count: preview.length, limit: NAME_LIMIT })}
                             </span>
                           )}
                         </span>
@@ -668,7 +675,7 @@ export function ExportDialog({
             <Stat label={t('export.projection')} value="WGS84" />
           </dl>
 
-          <p className="mt-3 text-[11px] leading-relaxed text-ink-400">{t('export.summary')}</p>
+          <p className="mt-3 text-[11px] leading-relaxed text-ink-400">{t('export.summary', { limit: NAME_LIMIT })}</p>
 
           {plan.unassignedCount > 0 && (
             <p className="mt-2 rounded-md border border-amber-700/50 bg-amber-950/30 p-2.5

@@ -216,6 +216,9 @@ export const es: Dictionary = {
   'toast.bulkDeleted.other': 'Se eliminaron {count} lotes.',
   'action.deleteFields': 'Eliminar {count} lotes',
 
+  'filter.sourceLabel': 'Archivo',
+  'filter.anySource': 'Cualquier archivo',
+  'filter.sourceHint': 'Muestra solo los lotes cuyos polígonos vinieron de un archivo. Un lote de archivos suele llegar con un cliente por archivo, así que así todo un cliente recibe su nombre de una vez.',
   'filter.issueLabel': 'Problema',
   'filter.anyIssue': 'Cualquier problema',
   'filter.issueHint': 'Muestra solo los lotes que llevan ese tipo de marca. El panel de calidad se ajusta junto, para que las dos listas sigan hablando de lo mismo.',
@@ -367,7 +370,6 @@ export const es: Dictionary = {
   'category.invalid-geometry': 'Geometría inválida',
   'category.overlap': 'Superposiciones',
   'category.jagged-edges': 'Bordes dentados',
-  'category.non-crop-area': 'Área no cultivada',
   'category.sliver': 'Astillas',
   'category.naming': 'Nombres de campaña',
   'category.unassigned': 'Sin agrupar',
@@ -407,11 +409,6 @@ export const es: Dictionary = {
   'flag.jagged.detail':
     'Los vértices están a unos {spacing} m entre sí a lo largo de {perimeter} m de contorno — ' +
     '{density} por hectárea. Tolerancia de suavizado sugerida: {tolerance} m.',
-  'flag.noncrop.title': '{feature} — posible área no cultivada incluida',
-  'flag.noncrop.detail':
-    'Cerca del {percent}% del área está en franjas más angostas que {width} m, que es la forma ' +
-    'que dejan un camino, un curso de agua o una cabecera. Contrástelo con la imagen satelital: ' +
-    'esto es un indicio, no un veredicto.',
   'flag.overlap.title': '{a} se superpone con {b}',
   'flag.overlap.detail': 'Comparten {area} ha ({squareMetres} m²).',
   'flag.duplicate.title': '{count} lotes comparten el nombre {field}',
@@ -444,10 +441,6 @@ export const es: Dictionary = {
   'guidance.jagged-edges':
     'Los contornos deberían estar suavizados. Los bordes dentados suelen venir de calcar ' +
     'imágenes satelitales o de registros GPS crudos; agregan ruido sin agregar precisión.',
-  'guidance.non-crop-area':
-    'Un contorno debe contener solo área de cultivo. Caminos, huellas, cursos de agua, ' +
-    'cabeceras, aerogeneradores e islas de árboles van fuera del contorno o dentro de una zona ' +
-    'de exclusión recortada en él.',
   'guidance.sliver':
     'Los fragmentos sueltos que quedan de la digitalización o de un recorte mal hecho no son ' +
     'zonas de manejo. Elimínelos para que cada lote sea el área realmente trabajada.',
@@ -468,10 +461,10 @@ export const es: Dictionary = {
     'distinto o, si de verdad son un solo lote trabajado en bloques separados, los combina en ' +
     'un único lote con un solo nombre.',
   'guidance.name-too-long':
-    'Client, Farm y Field se escriben como columnas de texto de 30 caracteres. Todo lo que ' +
-    'exceda queda cortado al escribir el archivo, y un nombre cortado puede colisionar con otro ' +
-    'cortado en el mismo punto: dos lotes se vuelven uno al subirlos. Acórtelos acá, donde ' +
-    'puede ver qué está perdiendo.',
+    'Client, Farm y Field se escriben como columnas de texto de {limit} caracteres. Todo lo ' +
+    'que exceda queda cortado al escribir el archivo, y un nombre cortado puede colisionar ' +
+    'con otro cortado en el mismo punto: dos lotes se vuelven uno al subirlos. Acórtelos ' +
+    'acá, donde puede ver qué está perdiendo.',
 
   'label.consistentNaming': 'Nomenclatura consistente',
   'label.singleZone': 'Zona continua única',
@@ -551,8 +544,8 @@ export const es: Dictionary = {
   'export.projection': 'Proyección',
   'export.summary':
     'Una fila por lote, con los polígonos de cada lote unidos en un solo MultiPolygon, y con ' +
-    'Client, Farm y Field escritos como columnas de texto de 30 caracteres. El zip contiene ' +
-    '.shp, .shx, .dbf, .prj y .cpg.',
+    'Client, Farm y Field escritos como columnas de texto de {limit} caracteres. El zip ' +
+    'contiene .shp, .shx, .dbf, .prj y .cpg.',
   'export.unassigned.one': '1 polígono sin asignar a un lote no se incluirá.',
   'export.unassigned.other': '{count} polígonos sin asignar a un lote no se incluirán.',
   'export.warnings.one': '1 aviso sin resolver',

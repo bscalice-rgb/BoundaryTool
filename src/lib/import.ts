@@ -9,6 +9,7 @@ import type {
   MultiPolygon,
   Polygon,
 } from 'geojson';
+import { NAME_LIMIT } from '../types';
 import type { PolyGeom } from '../types';
 import { normalize } from './geo';
 import { ARCHIVE_EXTENSIONS, isArchiveExtension, readArchive } from './archive';
@@ -594,7 +595,7 @@ export interface SourceColumn {
   sample: string;
   /** How many of the imported features carry a value here. */
   filled: number;
-  /** Values longer than the 30-character DBF column, which the export would shorten. */
+  /** Values longer than the DBF column, which the export would shorten. */
   tooLong: number;
 }
 
@@ -608,7 +609,7 @@ export function collectColumns(featuresProps: Record<string, unknown>[]): Source
       if (value !== '') {
         column.filled += 1;
         if (!column.sample) column.sample = value;
-        if (value.length > 30) column.tooLong += 1;
+        if (value.length > NAME_LIMIT) column.tooLong += 1;
       }
       columns.set(key, column);
     }

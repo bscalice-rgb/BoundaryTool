@@ -506,6 +506,51 @@ test.describe('the three ways out of an overlap', () => {
   });
 });
 
+test.describe('working one file at a time', () => {
+  /** The three sample files land as four fields, which is three different sources. */
+  async function importAsFields(page: Page) {
+    await page.setInputFiles('input[type=file]', FILES);
+    await page.getByRole('button', { name: 'Add to workspace' }).click();
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(4);
+  }
+
+  test('narrows the field list to the fields one file brought in', async ({ page }) => {
+    await page.goto('/');
+    await importAsFields(page);
+
+    const file = page.getByLabel('File', { exact: true });
+    await expect(file).toBeVisible();
+    // Each file is offered with the number of fields that came out of it.
+    await expect(file.locator('option', { hasText: 'parcelles.zip (1)' })).toHaveCount(1);
+
+    await file.selectOption('blocks.kmz');
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(2);
+
+    await file.selectOption('all');
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(4);
+  });
+
+  test('gives one file its own client in a single pass', async ({ page }) => {
+    await page.goto('/');
+    await importAsFields(page);
+
+    // The workflow a multi-file drop is really about: one client per file.
+    await page.getByLabel('File', { exact: true }).selectOption('blocks.kmz');
+    await page.getByRole('checkbox', { name: 'Select all fields' }).check();
+    await expect(page.getByText('2 fields ticked')).toBeVisible();
+    await page.locator('input[aria-label="Client for all ticked fields"]').fill('Rancho Norte');
+    await page.getByRole('button', { name: 'Apply' }).click();
+
+    await page.getByLabel('File', { exact: true }).selectOption('all');
+    const clients = await page
+      .locator('input[aria-label="Client"]')
+      .evaluateAll((inputs) => (inputs as HTMLInputElement[]).map((input) => input.value));
+    // Exactly the two that came out of that file, and nothing else in the workspace.
+    expect(clients.filter((value) => value === 'Rancho Norte')).toHaveLength(2);
+    expect(clients).toContain('Ferme SA');
+  });
+});
+
 test.describe('bulk naming', () => {
   /** Imports with the guessed mapping, which names every one of the four polygons. */
   const FIELD_COUNT = 4;
@@ -1070,16 +1115,18 @@ test('shortens a name that will not fit the column', async ({ page }) => {
       window.HTMLInputElement.prototype,
       'value',
     )!.set!;
-    setter.call(input, 'North Field Behind The Old Barn At Manor Farm');
+    setter.call(input, 'North Field Behind The Old Barn At Manor Farm Near The River Crossing');
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
 
   const flag = page.locator('article', { hasText: 'too long for the column' });
   await expect(flag).toBeVisible();
-  await expect(flag).toContainText('Field (45)');
+  await expect(flag).toContainText('Field (69)');
 
   await flag.getByRole('button', { name: 'Auto-fix' }).click();
-  await expect(attributeCell(page, 'field').first()).toHaveValue('North Field Behind The Old');
+  await expect(attributeCell(page, 'field').first()).toHaveValue(
+    'North Field Behind The Old Barn At Manor Farm Near The',
+  );
   await expect(page.getByText('0 blocking')).toBeVisible();
 });
 
@@ -1314,8 +1361,18 @@ test.describe('the two panels as one workflow', () => {
   test('auto-fixes a batch as one undoable step', async ({ page }) => {
     await page.goto('/');
     await importAsFields(page);
-    await forceValue(page, 'field', 1, 'North Field Behind The Old Barn At Manor Farm');
-    await forceValue(page, 'field', 3, 'South Field Behind The New Barn At Manor Farm');
+    await forceValue(
+      page,
+      'field',
+      1,
+      'North Field Behind The Old Barn At Manor Farm Near The River Crossing',
+    );
+    await forceValue(
+      page,
+      'field',
+      3,
+      'South Field Behind The New Barn At Manor Farm Near The River Crossing',
+    );
 
     await page.getByRole('button', { name: /^Names too long/ }).click();
     await expect(page.locator('article')).toHaveCount(2);
@@ -1325,16 +1382,20 @@ test.describe('the two panels as one workflow', () => {
     await page.getByRole('button', { name: 'Auto-fix 2' }).click();
 
     await expect(page.getByText('Fixed 2 issues')).toBeVisible();
-    await expect(attributeCell(page, 'field').nth(1)).toHaveValue('North Field Behind The Old');
-    await expect(attributeCell(page, 'field').nth(3)).toHaveValue('South Field Behind The New');
+    await expect(attributeCell(page, 'field').nth(1)).toHaveValue(
+      'North Field Behind The Old Barn At Manor Farm Near The',
+    );
+    await expect(attributeCell(page, 'field').nth(3)).toHaveValue(
+      'South Field Behind The New Barn At Manor Farm Near The',
+    );
 
     // One entry in the history, so one undo puts both back.
     await page.keyboard.press('Control+z');
     await expect(attributeCell(page, 'field').nth(1)).toHaveValue(
-      'North Field Behind The Old Barn At Manor Farm',
+      'North Field Behind The Old Barn At Manor Farm Near The River Crossing',
     );
     await expect(attributeCell(page, 'field').nth(3)).toHaveValue(
-      'South Field Behind The New Barn At Manor Farm',
+      'South Field Behind The New Barn At Manor Farm Near The River Crossing',
     );
   });
 

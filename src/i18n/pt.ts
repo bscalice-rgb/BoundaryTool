@@ -220,6 +220,9 @@ export const pt: Dictionary = {
   'toast.bulkDeleted.other': '{count} talhões excluídos.',
   'action.deleteFields': 'Excluir {count} talhões',
 
+  'filter.sourceLabel': 'Arquivo',
+  'filter.anySource': 'Qualquer arquivo',
+  'filter.sourceHint': 'Mostra só os talhões cujos polígonos vieram de um arquivo. Um lote de arquivos costuma chegar com um cliente por arquivo, então é assim que o cliente inteiro recebe o nome de uma vez.',
   'filter.issueLabel': 'Problema',
   'filter.anyIssue': 'Qualquer problema',
   'filter.issueHint': 'Mostra apenas os talhões com esse tipo de sinalização. O painel de qualidade acompanha, para as duas listas continuarem falando da mesma coisa.',
@@ -371,7 +374,6 @@ export const pt: Dictionary = {
   'category.invalid-geometry': 'Geometria inválida',
   'category.overlap': 'Sobreposições',
   'category.jagged-edges': 'Bordas irregulares',
-  'category.non-crop-area': 'Área não cultivada',
   'category.sliver': 'Fragmentos',
   'category.naming': 'Nomes de safra',
   'category.unassigned': 'Sem agrupamento',
@@ -413,11 +415,6 @@ export const pt: Dictionary = {
   'flag.jagged.detail':
     'Os vértices ficam a cerca de {spacing} m entre si ao longo de {perimeter} m de contorno ' +
     '— {density} por hectare. Tolerância de suavização sugerida: {tolerance} m.',
-  'flag.noncrop.title': '{feature} — possível área não cultivada incluída',
-  'flag.noncrop.detail':
-    'Cerca de {percent}% da área está em faixas mais estreitas que {width} m, que é o formato ' +
-    'de um carreador, curso d’água ou bordadura. Confira contra a imagem — isto é um ' +
-    'indício, não um veredito.',
   'flag.overlap.title': '{a} sobrepõe {b}',
   'flag.overlap.detail': 'Eles compartilham {area} ha ({squareMetres} m²).',
   'flag.duplicate.title': '{count} talhões compartilham o nome {field}',
@@ -450,10 +447,6 @@ export const pt: Dictionary = {
   'guidance.jagged-edges':
     'Contornos devem ser suavizados. Bordas irregulares geralmente vêm de traçar sobre imagem ' +
     'raster ou de registros brutos de GPS; elas somam ruído sem somar precisão.',
-  'guidance.non-crop-area':
-    'Um contorno deve conter apenas área de cultivo. Estradas, carreadores, cursos d’água, ' +
-    'bordaduras, aerogeradores e manchas de árvores ficam fora do contorno ou dentro de uma ' +
-    'zona de exclusão recortada nele.',
   'guidance.sliver':
     'Fragmentos soltos que sobraram da digitalização ou de um recorte malfeito não são zonas ' +
     'de manejo. Remova-os para que cada talhão seja a área realmente cultivada.',
@@ -475,10 +468,10 @@ export const pt: Dictionary = {
     'distinta, ou — se realmente forem um só talhão cultivado em blocos separados — combine-as ' +
     'em um único talhão com um nome.',
   'guidance.name-too-long':
-    'Client, Farm e Field são gravados como colunas de texto de 30 caracteres. Qualquer coisa ' +
-    'mais longa é cortada quando o arquivo é escrito, e um nome cortado pode colidir com outro ' +
-    'cortado no mesmo ponto — então dois talhões viram um só no envio. Encurte-os aqui, onde ' +
-    'você vê o que está perdendo.',
+    'Client, Farm e Field são gravados como colunas de texto de {limit} caracteres. Qualquer ' +
+    'coisa mais longa é cortada quando o arquivo é escrito, e um nome cortado pode colidir ' +
+    'com outro cortado no mesmo ponto — então dois talhões viram um só no envio. Encurte-os ' +
+    'aqui, onde você vê o que está perdendo.',
 
   'label.consistentNaming': 'Nomes consistentes',
   'label.singleZone': 'Zona contínua única',
@@ -558,8 +551,8 @@ export const pt: Dictionary = {
   'export.projection': 'Projeção',
   'export.summary':
     'Uma linha por talhão, com os polígonos de cada talhão unidos em um único MultiPolygon, e ' +
-    'Client, Farm e Field gravados como colunas de texto de 30 caracteres. O zip contém .shp, ' +
-    '.shx, .dbf, .prj e .cpg.',
+    'Client, Farm e Field gravados como colunas de texto de {limit} caracteres. O zip contém ' +
+    '.shp, .shx, .dbf, .prj e .cpg.',
   'export.unassigned.one': '1 polígono não atribuído a um talhão não será incluído.',
   'export.unassigned.other': '{count} polígonos não atribuídos a um talhão não serão incluídos.',
   'export.warnings.one': '1 aviso não resolvido',

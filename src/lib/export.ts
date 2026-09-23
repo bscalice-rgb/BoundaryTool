@@ -1,6 +1,7 @@
 import type { MultiPolygon } from 'geojson';
 import { ambientT } from '../i18n/translator';
 import type { Translator } from '../i18n/translator';
+import { NAME_LIMIT } from '../types';
 import type { QAFlag, WField, Workspace } from '../types';
 import { toMultiPolygon } from './geo';
 import { fieldGeometries } from './qa';
@@ -13,12 +14,13 @@ import {
 
 /**
  * The CropForce schema, and nothing else. Names stay within the 10-character DBF
- * header limit; values get 30 bytes so real farm and field names survive intact.
+ * header limit; values get `NAME_LIMIT` bytes so real farm and field names survive
+ * intact.
  */
 export const CROPFORCE_FIELDS: DbfFieldSpec[] = [
-  { name: 'Client', length: 30 },
-  { name: 'Farm', length: 30 },
-  { name: 'Field', length: 30 },
+  { name: 'Client', length: NAME_LIMIT },
+  { name: 'Farm', length: NAME_LIMIT },
+  { name: 'Field', length: NAME_LIMIT },
 ];
 
 export interface ExportRow extends ShapefileRow {

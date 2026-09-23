@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import shp from 'shpjs';
 import type { MultiPolygon } from 'geojson';
 import type { Workspace } from '../types';
-import { emptyWorkspace } from '../types';
+import { NAME_LIMIT, emptyWorkspace } from '../types';
 import {
   addDrawnFeature,
   addImported,
@@ -243,13 +243,13 @@ describe('duplicate Client/Farm/Field combinations', () => {
     expect(runChecks(outcome.workspace).map((f) => f.kind)).not.toContain('duplicate-name');
   });
 
-  it('keeps renamed values inside the 30-character column', () => {
-    const workspace = collidingWorkspace('X'.repeat(30));
+  it('keeps renamed values inside the attribute column', () => {
+    const workspace = collidingWorkspace('X'.repeat(NAME_LIMIT));
     const flag = runChecks(workspace).find((f) => f.kind === 'duplicate-name')!;
     const outcome = autoUniquifyNames(workspace, flag.fieldIds);
 
     for (const field of outcome.workspace.fields) {
-      expect(field.field.length).toBeLessThanOrEqual(30);
+      expect(field.field.length).toBeLessThanOrEqual(NAME_LIMIT);
     }
     expect(new Set(outcome.workspace.fields.map((f) => f.field)).size).toBe(2);
   });
@@ -285,8 +285,8 @@ describe('duplicate Client/Farm/Field combinations', () => {
   });
 });
 
-describe('names too long for the 30-character column', () => {
-  const LONG = 'North Field Behind The Old Barn At Manor Farm';
+describe('names too long for the attribute column', () => {
+  const LONG = 'North Field Behind The Old Barn At Manor Farm Near The River Crossing';
 
   function withLongName(name = LONG): Workspace {
     let workspace: Workspace = { fields: [], features: [newFeature(square(2.5, 48.8), 'a.zip')] };
@@ -309,20 +309,20 @@ describe('names too long for the 30-character column', () => {
 
   it('names every attribute that is over, not just the first', () => {
     let workspace = withLongName();
-    workspace = updateField(workspace, workspace.fields[0].id, { client: 'C'.repeat(40) });
+    workspace = updateField(workspace, workspace.fields[0].id, { client: 'C'.repeat(80) });
     const flag = runChecks(workspace).find((f) => f.kind === 'name-too-long')!;
-    expect(flag.detail).toContain('Client (40)');
+    expect(flag.detail).toContain('Client (80)');
     expect(flag.detail).toContain(`Field (${LONG.length})`);
   });
 
   it('trims at a word boundary rather than mid-word', () => {
-    expect(shortenToLimit(LONG)).toBe('North Field Behind The Old');
-    expect(shortenToLimit(LONG).length).toBeLessThanOrEqual(30);
+    expect(shortenToLimit(LONG)).toBe('North Field Behind The Old Barn At Manor Farm Near The');
+    expect(shortenToLimit(LONG).length).toBeLessThanOrEqual(NAME_LIMIT);
   });
 
   it('falls back to a hard cut when there is no usable word boundary', () => {
-    const solid = 'A'.repeat(45);
-    expect(shortenToLimit(solid)).toBe('A'.repeat(30));
+    const solid = 'A'.repeat(NAME_LIMIT + 15);
+    expect(shortenToLimit(solid)).toBe('A'.repeat(NAME_LIMIT));
   });
 
   it('leaves a name that already fits completely alone', () => {
@@ -340,7 +340,7 @@ describe('names too long for the 30-character column', () => {
     const outcome = autoShortenNames(workspace, flag.fieldIds);
 
     expect(outcome.ok).toBe(true);
-    expect(outcome.workspace.fields[0].field.length).toBeLessThanOrEqual(30);
+    expect(outcome.workspace.fields[0].field.length).toBeLessThanOrEqual(NAME_LIMIT);
     expect(runChecks(outcome.workspace).map((f) => f.kind)).not.toContain('name-too-long');
   });
 
@@ -360,7 +360,7 @@ describe('names too long for the 30-character column', () => {
 
     const names = outcome.workspace.fields.map((f) => f.field);
     expect(new Set(names).size).toBe(2);
-    for (const name of names) expect(name.length).toBeLessThanOrEqual(30);
+    for (const name of names) expect(name.length).toBeLessThanOrEqual(NAME_LIMIT);
     const after = runChecks(outcome.workspace).map((f) => f.kind);
     expect(after).not.toContain('name-too-long');
     expect(after).not.toContain('duplicate-name');

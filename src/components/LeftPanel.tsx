@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { NAME_LIMIT } from '../types';
 import type { FeatureId, FieldId, FlagKind, QAFlag, WFeature, WField, Workspace } from '../types';
 import { useT } from '../i18n';
 import type { StringKey } from '../i18n';
@@ -75,6 +76,7 @@ export default function LeftPanel(props: LeftPanelProps) {
   const [checked, setChecked] = useState<ReadonlySet<FieldId>>(new Set());
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<StatusFilter>('all');
+  const [source, setSource] = useState<string>('all');
 
   const allFields = useMemo(() => fieldGeometries(workspace), [workspace]);
   const allUngrouped = useMemo(
@@ -103,6 +105,38 @@ export default function LeftPanel(props: LeftPanelProps) {
     }
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
   }, [kindsByField]);
+
+  /**
+   * Which files each field's polygons came from. A field built from two files appears
+   * under both, because it genuinely came out of both.
+   */
+  const sourcesByField = useMemo(() => {
+    const map = new Map<FieldId, Set<string>>();
+    for (const feature of workspace.features) {
+      if (!feature.fieldId) continue;
+      const set = map.get(feature.fieldId) ?? new Set<string>();
+      set.add(feature.source);
+      map.set(feature.fieldId, set);
+    }
+    return map;
+  }, [workspace.features]);
+
+  /** Every file in the workspace, counted by how many fields came out of it. */
+  const sources = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const set of sourcesByField.values()) {
+      for (const name of set) counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    for (const feature of workspace.features) {
+      if (!feature.fieldId && !counts.has(feature.source)) counts.set(feature.source, 0);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [sourcesByField, workspace.features]);
+
+  // A file whose last polygon has gone must not keep the list filtered to nothing.
+  useEffect(() => {
+    if (source !== 'all' && !sources.some(([name]) => name === source)) setSource('all');
+  }, [sources, source]);
 
   /** How many blocking flags and how many outstanding warnings each field carries. */
   const statusByField = useMemo(() => {
@@ -140,6 +174,9 @@ export default function LeftPanel(props: LeftPanelProps) {
   const matchesCategory = (id: FieldId): boolean =>
     props.category === 'all' || (kindsByField.get(id)?.has(props.category) ?? false);
 
+  const matchesSource = (id: FieldId): boolean =>
+    source === 'all' || (sourcesByField.get(id)?.has(source) ?? false);
+
   const matchesStatus = (id: FieldId): boolean => {
     if (status === 'all') return true;
     const entry = statusByField.get(id) ?? { blocking: 0, review: 0 };
@@ -169,10 +206,23 @@ export default function LeftPanel(props: LeftPanelProps) {
             ),
           )
       ).filter(
-        (entry) => matchesStatus(entry.field.id) && matchesCategory(entry.field.id),
+        (entry) =>
+          matchesStatus(entry.field.id) &&
+          matchesCategory(entry.field.id) &&
+          matchesSource(entry.field.id),
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allFields, terms, workspace.features, status, statusByField, props.category, kindsByField],
+    [
+      allFields,
+      terms,
+      workspace.features,
+      status,
+      statusByField,
+      props.category,
+      kindsByField,
+      source,
+      sourcesByField,
+    ],
   );
 
   const ungrouped = useMemo(
@@ -181,11 +231,12 @@ export default function LeftPanel(props: LeftPanelProps) {
       // step aside rather than pretending to have a status.
       status !== 'all' || props.category !== 'all'
         ? []
-        : terms.length === 0
-          ? allUngrouped
-          : allUngrouped.filter((f) => matches(f.source)),
+        : (terms.length === 0 ? allUngrouped : allUngrouped.filter((f) => matches(f.source)))
+            // A file filter is about where a polygon came from, which ungrouped
+            // polygons can answer as well as fields can.
+            .filter((f) => source === 'all' || f.source === source),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allUngrouped, terms, status, props.category],
+    [allUngrouped, terms, status, props.category, source],
   );
 
   /** Fields with nothing blocking them, which is what "ready to export" means. */
@@ -195,7 +246,8 @@ export default function LeftPanel(props: LeftPanelProps) {
   );
 
   const hiddenFields = allFields.length - fields.length;
-  const filtering = terms.length > 0 || status !== 'all' || props.category !== 'all';
+  const filtering =
+    terms.length > 0 || status !== 'all' || props.category !== 'all' || source !== 'all';
   const searching = filtering;
 
   const totalHa = fields.reduce((sum, entry) => sum + entry.areaHa, 0);
@@ -393,6 +445,29 @@ export default function LeftPanel(props: LeftPanelProps) {
             );
           })}
         </div>
+
+        {sources.length > 1 && (
+          <label
+            className="mt-1.5 flex items-center gap-1.5 text-[10px] text-ink-400"
+            title={t('filter.sourceHint')}
+          >
+            {t('filter.sourceLabel')}
+            <select
+              value={source}
+              onChange={(event) => setSource(event.target.value)}
+              aria-label={t('filter.sourceLabel')}
+              className="min-w-0 flex-1 rounded border border-ink-700 bg-ink-950 px-1.5 py-0.5
+                text-[10px] text-ink-100 focus:border-crop-500 focus:outline-none"
+            >
+              <option value="all">{t('filter.anySource')}</option>
+              {sources.map(([name, count]) => (
+                <option key={name} value={name}>
+                  {name} ({count})
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
 
         {categories.length > 0 && (
           <label
@@ -868,7 +943,7 @@ function AttributeCell({
         data-empty={value.trim() === ''}
         data-blocked={showBlocked && value.trim() === ''}
         value={value}
-        maxLength={30}
+        maxLength={NAME_LIMIT}
         spellCheck={false}
         placeholder={t(column === 'field' ? 'fields.fieldPlaceholder' : `fields.${column}`)}
         onChange={(event) => onChange(event.target.value)}
@@ -991,7 +1066,7 @@ function BulkAttributeBar({
           onChange={(event) => setClient(event.target.value)}
           onKeyDown={(event) => event.key === 'Enter' && apply()}
           placeholder={t('bulk.clientPlaceholder')}
-          maxLength={30}
+          maxLength={NAME_LIMIT}
           spellCheck={false}
           aria-label={t('bulk.clientLabel')}
           className="min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-950 px-2 py-1.5
@@ -1002,7 +1077,7 @@ function BulkAttributeBar({
           onChange={(event) => setFarm(event.target.value)}
           onKeyDown={(event) => event.key === 'Enter' && apply()}
           placeholder={t('bulk.farmPlaceholder')}
-          maxLength={30}
+          maxLength={NAME_LIMIT}
           spellCheck={false}
           aria-label={t('bulk.farmLabel')}
           className="min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-950 px-2 py-1.5

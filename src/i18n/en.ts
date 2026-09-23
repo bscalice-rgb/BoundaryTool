@@ -208,6 +208,9 @@ export const en = {
   'toast.bulkDeleted.other': 'Deleted {count} fields.',
   'action.deleteFields': 'Delete {count} fields',
 
+  'filter.sourceLabel': 'File',
+  'filter.anySource': 'Any file',
+  'filter.sourceHint': 'Show only fields whose polygons came from one file. A batch usually arrives one client per file, so this is how the whole of one client gets a Client name in one go.',
   'filter.issueLabel': 'Problem',
   'filter.anyIssue': 'Any problem',
   'filter.issueHint': 'Show only fields carrying this kind of flag. The quality panel narrows with it, so the two lists stay about the same thing.',
@@ -358,7 +361,6 @@ export const en = {
   'category.invalid-geometry': 'Invalid geometry',
   'category.overlap': 'Overlaps',
   'category.jagged-edges': 'Jagged edges',
-  'category.non-crop-area': 'Non-crop area',
   'category.sliver': 'Slivers',
   'category.naming': 'Season names',
   'category.unassigned': 'Ungrouped',
@@ -397,11 +399,6 @@ export const en = {
   'flag.jagged.detail':
     'Vertices sit about {spacing} m apart over {perimeter} m of boundary — {density} per ' +
     'hectare. Suggested smoothing tolerance: {tolerance} m.',
-  'flag.noncrop.title': '{feature} — possible non-crop area included',
-  'flag.noncrop.detail':
-    'About {percent}% of the area sits in strips narrower than {width} m, which is the ' +
-    'shape a track, watercourse or headland buffer makes. Check it against the imagery — ' +
-    'this is a hint, not a verdict.',
   'flag.overlap.title': '{a} overlaps {b}',
   'flag.overlap.detail': 'They share {area} ha ({squareMetres} m²).',
   'flag.duplicate.title': '{count} fields share the name {field}',
@@ -434,10 +431,6 @@ export const en = {
   'guidance.jagged-edges':
     'Boundaries should be smoothed. Jagged edges usually come from tracing raster imagery or ' +
     'from raw GPS logs; they add noise without adding accuracy.',
-  'guidance.non-crop-area':
-    'A boundary should contain crop area only. Roads, tracks, waterways, headland buffers, ' +
-    'wind turbines and tree islands belong outside the boundary or inside an exclusion zone ' +
-    'cut into it.',
   'guidance.sliver':
     'Stray fragments left over from digitising or from a bad clip are not management zones. ' +
     'Remove them so each field is the area actually farmed.',
@@ -457,10 +450,10 @@ export const en = {
     'distinct, or — if they really are one field farmed in separate blocks — combine them ' +
     'into a single field with one name.',
   'guidance.name-too-long':
-    'Client, Farm and Field are written as 30-character text columns. Anything longer is cut ' +
-    'off when the file is written, and a name that has been cut off can collide with another ' +
-    'that was cut off at the same point — so two fields become one on upload. Shorten them ' +
-    'here, where you can see what you are losing.',
+    'Client, Farm and Field are written as {limit}-character text columns. Anything longer is ' +
+    'cut off when the file is written, and a name that has been cut off can collide with ' +
+    'another that was cut off at the same point — so two fields become one on upload. ' +
+    'Shorten them here, where you can see what you are losing.',
 
   'label.consistentNaming': 'Consistent naming',
   'label.singleZone': 'Single continuous zone',
@@ -540,7 +533,7 @@ export const en = {
   'export.projection': 'Projection',
   'export.summary':
     "One row per field, each field's polygons merged into a single MultiPolygon, with " +
-    'Client, Farm and Field written as 30-character text columns. The zip contains .shp, ' +
+    'Client, Farm and Field written as {limit}-character text columns. The zip contains .shp, ' +
     '.shx, .dbf, .prj and .cpg.',
   'export.unassigned.one': '1 polygon not assigned to a field will not be included.',
   'export.unassigned.other': '{count} polygons not assigned to a field will not be included.',

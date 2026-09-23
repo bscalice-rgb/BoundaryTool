@@ -1,9 +1,9 @@
-import buffer from '@turf/buffer';
 import type { BBox } from 'geojson';
 import { ambientT } from '../i18n/translator';
 import type { StringKey, Translator } from '../i18n/translator';
 import { deleteFields } from '../state/ops';
 import { hasNonAscii, nonAsciiCharacters, toAscii } from './text';
+import { NAME_LIMIT } from '../types';
 import type {
   FieldId,
   FlagKind,
@@ -22,7 +22,6 @@ import {
   bufferMeters,
   checkValidity,
   differenceGeom,
-  feat,
   formatHa,
   formatNum,
   overlapAreaM2,
@@ -46,10 +45,6 @@ export interface QaThresholds {
   jaggedMinVertices: number;
   /** ... and they sit closer together than this along the boundary. */
   jaggedMaxSpacingM: number;
-  /** Half-width of the protrusions the non-crop heuristic looks for. */
-  protrusionWidthM: number;
-  /** Share of area that must sit in thin protrusions before it is worth flagging. */
-  protrusionAreaShare: number;
   /**
    * Share of the smaller field that two fields must share before they stop being an
    * overlap and start being the same boundary twice.
@@ -62,8 +57,6 @@ export const DEFAULT_THRESHOLDS: QaThresholds = {
   overlapMinM2: 1,
   jaggedMinVertices: 50,
   jaggedMaxSpacingM: 4,
-  protrusionWidthM: 8,
-  protrusionAreaShare: 0.04,
   duplicateAreaShare: 0.9,
 };
 
@@ -72,7 +65,9 @@ export const DEFAULT_THRESHOLDS: QaThresholds = {
 /* -------------------------------------------------------------------------- */
 
 export const guidanceFor = (kind: FlagKind, t: Translator = ambientT()): string =>
-  t(`guidance.${kind}` as const);
+  // Only the length guidance names the column width, but handing it to all of them
+  // costs nothing and means no guidance string can be written without it.
+  t(`guidance.${kind}` as const, { limit: NAME_LIMIT });
 
 /* -------------------------------------------------------------------------- */
 /* Derived views over the workspace                                            */
@@ -224,7 +219,7 @@ export function runChecks(
   }
 
   /*
-   * Values that will not survive the 30-character column. The export truncates them
+   * Values that will not survive the attribute column. The export truncates them
    * silently, which is the sort of loss you only notice months later, so it is stopped
    * here instead.
    */
@@ -408,24 +403,6 @@ export function runChecks(
         manual: 'simplify',
       });
     }
-
-    const protrusion = protrusionShare(feature.geometry, thresholds.protrusionWidthM);
-    if (protrusion !== null && protrusion >= thresholds.protrusionAreaShare) {
-      flags.push({
-        id: `noncrop:${feature.id}`,
-        kind: 'non-crop-area',
-        severity: 'warning',
-        title: t('flag.noncrop.title', { feature: label }),
-        detail: t('flag.noncrop.detail', {
-          percent: formatNum(protrusion * 100),
-          width: thresholds.protrusionWidthM * 2,
-        }),
-        guidance: guidanceFor('non-crop-area', t),
-        featureIds: [feature.id],
-        fieldIds: feature.fieldId ? [feature.fieldId] : [],
-        manual: 'cut-hole',
-      });
-    }
   }
 
   /* -- Overlaps between fields --------------------------------------------- */
@@ -496,43 +473,6 @@ export function runChecks(
 
 function suggestedTolerance(spacingM: number): number {
   return Math.min(10, Math.max(1, Math.round(spacingM * 3)));
-}
-
-/**
- * Morphological opening: shrink the polygon by `width` then grow it back. Anything
- * narrower than `2 × width` disappears and never returns, so the area lost is the
- * area sitting in thin strips — roads, tracks, buffers and spurs.
- *
- * Returns null when the shape is too small for the test to say anything useful.
- */
-const protrusionCache = new WeakMap<object, Map<number, number | null>>();
-
-export function protrusionShare(geometry: PolyGeom, widthM: number): number | null {
-  // Two buffer operations per feature per pass is too much to repeat while someone is
-  // typing in the attribute table, and the geometry object is a safe cache key.
-  const byWidth = protrusionCache.get(geometry) ?? new Map<number, number | null>();
-  if (byWidth.has(widthM)) return byWidth.get(widthM) ?? null;
-  const result = computeProtrusionShare(geometry, widthM);
-  byWidth.set(widthM, result);
-  protrusionCache.set(geometry, byWidth);
-  return result;
-}
-
-function computeProtrusionShare(geometry: PolyGeom, widthM: number): number | null {
-  const total = areaM2(geometry);
-  if (total < 5_000) return null; // below 0.5 ha the measure is dominated by shape noise
-  try {
-    const shrunk = buffer(feat(geometry), -widthM, { units: 'meters', steps: 8 });
-    // The whole shape vanished: it is narrower than the probe everywhere, which makes
-    // it a track or a hedge line rather than a field with a protrusion on it.
-    if (!shrunk?.geometry || areaM2(shrunk.geometry as PolyGeom) <= 0) return 1;
-    const grown = buffer(shrunk, widthM, { units: 'meters', steps: 8 });
-    if (!grown?.geometry) return 1;
-    const remaining = areaM2(grown.geometry as PolyGeom);
-    return Math.max(0, Math.min(1, (total - remaining) / total));
-  } catch {
-    return null;
-  }
 }
 
 /** Explains why a field name looks season-specific, or returns null if it is fine. */
@@ -618,9 +558,6 @@ export function nameKey(field: Pick<WField, 'client' | 'farm' | 'field'>): strin
     .map((value) => value.trim().toLowerCase().replace(/\s+/g, ' '))
     .join(' | ');
 }
-
-/** DBF character width for every attribute, mirrored from the export schema. */
-export const NAME_LIMIT = 30;
 
 /**
  * Numbers a duplicated field name apart: "Long Acre" becomes "Long Acre (2)", trimmed
