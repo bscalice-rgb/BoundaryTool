@@ -137,7 +137,36 @@ export async function writeFixtures(): Promise<void> {
     }),
   );
 
-  // 6. A plain WGS84 GeoJSON.
+  // 6. An estate drawn as touching blocks, two of them bow-tied through a repeated
+  //     vertex — the shape a real plantation file arrives in.
+  const pinched = (x: number, y: number, size: number): Position[] => [
+    [x, y],
+    [x + size, y],
+    [x + size / 2, y + size / 2],
+    [x + size, y + size],
+    [x, y + size],
+    [x + size / 2, y + size / 2],
+    [x, y],
+  ];
+  writeFileSync(
+    join(FIXTURE_DIR, 'estate.geojson'),
+    JSON.stringify({
+      type: 'Feature',
+      properties: { Client: 'Batang Kulim', Farm: 'Estate 2', Field: 'Division I' },
+      geometry: {
+        type: 'MultiPolygon',
+        coordinates: [
+          [ring(100.5, 0.8, 0.004)],
+          [pinched(100.504, 0.8, 0.004)],
+          [ring(100.508, 0.8, 0.004)],
+          [pinched(100.512, 0.8, 0.004)],
+          [ring(100.516, 0.8, 0.004)],
+        ],
+      },
+    }),
+  );
+
+  // 7. A plain WGS84 GeoJSON.
   writeFileSync(
     join(FIXTURE_DIR, 'extra.geojson'),
     JSON.stringify({

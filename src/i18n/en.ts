@@ -391,6 +391,7 @@ export const en = {
   'flag.invalid.notClosed': 'a ring that is not closed',
   'flag.invalid.kinks.one': '1 self-intersection (bow-tie)',
   'flag.invalid.kinks.other': '{count} self-intersections (bow-tie)',
+  'flag.invalid.selfOverlap': 'two blocks overlapping each other by {area} m², which counts that ground twice',
   'flag.sliver.title': '{feature} — sliver ({area} ha)',
   'flag.sliver.detail':
     'Smaller than the {threshold} ha threshold, so this is probably a digitising fragment ' +

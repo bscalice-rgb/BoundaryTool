@@ -217,20 +217,70 @@ export function bboxesOverlap(a: BBox, b: BBox): boolean {
 /* Validity                                                                    */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Self-intersections, counted one part at a time.
+ *
+ * Handed a MultiPolygon, turf flattens every ring of every part into one list and
+ * compares them pairwise, so two blocks of the same field that share a boundary — which
+ * is exactly what conjoined blocks do — are reported as self-intersections. A field
+ * digitised as thirty touching blocks can rack up dozens of them, none of them real and
+ * none of them fixable, which is worse than not checking at all. Only a part crossing
+ * itself is a fault, so each part is measured on its own.
+ */
 export function selfIntersections(geometry: PolyGeom): number {
   try {
-    return kinks(feat(geometry) as Feature<Polygon | MultiPolygon>).features.length;
+    return explode(geometry).reduce(
+      (sum, part) => sum + kinks(feat(part) as Feature<Polygon>).features.length,
+      0,
+    );
   } catch {
     return 0;
   }
 }
 
+/** Overlap between two parts below this is floating-point noise along a shared edge. */
+export const SELF_OVERLAP_MIN_M2 = 1;
+
+/**
+ * Square metres two parts of one outline claim twice over.
+ *
+ * Parts that touch are fine — that is what conjoined blocks do, and it is the case the
+ * kink count used to mistake for a bow-tie. Parts that genuinely overlap are ground
+ * counted twice inside a single field, which the export would carry into the upload,
+ * and which `repairGeometry` resolves by uniting them.
+ *
+ * Comparing every pair costs real time on a field of thirty blocks, so it stops as soon
+ * as it has found more than the caller could ignore.
+ */
+export function selfOverlapM2(geometry: PolyGeom): number {
+  const parts = explode(geometry);
+  if (parts.length < 2) return 0;
+  const boxes = parts.map((part) => bboxOf(part));
+  let total = 0;
+  for (let i = 0; i < parts.length; i++) {
+    for (let j = i + 1; j < parts.length; j++) {
+      if (!bboxesOverlap(boxes[i], boxes[j])) continue;
+      total += overlapAreaM2(parts[i], parts[j]);
+      if (total > SELF_OVERLAP_MIN_M2) return total;
+    }
+  }
+  return total;
+}
+
 /** Why an outline is unusable, as a code the UI turns into words in its own language. */
-export type InvalidReason = 'none' | 'no-rings' | 'short-ring' | 'not-closed' | 'kinks';
+export type InvalidReason =
+  | 'none'
+  | 'no-rings'
+  | 'short-ring'
+  | 'not-closed'
+  | 'kinks'
+  | 'self-overlap';
 
 export interface ValidityReport {
   ok: boolean;
   kinkCount: number;
+  /** Square metres the outline claims twice over, when parts of it overlap. */
+  overlapM2: number;
   reason: InvalidReason;
 }
 
@@ -251,57 +301,129 @@ export function checkValidity(geometry: PolyGeom): ValidityReport {
 }
 
 function computeValidity(geometry: PolyGeom): ValidityReport {
+  const blank = { kinkCount: 0, overlapM2: 0 };
   const rings = allRings(geometry);
-  if (rings.length === 0) return { ok: false, kinkCount: 0, reason: 'no-rings' };
+  if (rings.length === 0) return { ok: false, ...blank, reason: 'no-rings' };
   for (const ring of rings) {
     if (ring.length < 4) {
-      return { ok: false, kinkCount: 0, reason: 'short-ring' };
+      return { ok: false, ...blank, reason: 'short-ring' };
     }
     const [fx, fy] = ring[0];
     const [lx, ly] = ring[ring.length - 1];
     if (fx !== lx || fy !== ly) {
-      return { ok: false, kinkCount: 0, reason: 'not-closed' };
+      return { ok: false, ...blank, reason: 'not-closed' };
     }
   }
   const kinkCount = selfIntersections(geometry);
   if (kinkCount > 0) {
-    return {
-      ok: false,
-      kinkCount,
-      reason: 'kinks',
-    };
+    return { ok: false, kinkCount, overlapM2: 0, reason: 'kinks' };
   }
-  return { ok: true, kinkCount: 0, reason: 'none' };
+  const overlapM2 = selfOverlapM2(geometry);
+  if (overlapM2 > SELF_OVERLAP_MIN_M2) {
+    return { ok: false, kinkCount: 0, overlapM2, reason: 'self-overlap' };
+  }
+  return { ok: true, ...blank, reason: 'none' };
 }
 
 /**
- * Repairs a self-intersecting polygon by un-kinking it and re-uniting the pieces,
- * which keeps the outer shape while dropping the crossed-over slivers.
+ * Repairs a self-intersecting outline.
+ *
+ * Two different faults both read as "self-intersecting", and they need different
+ * answers. A ring that crosses itself — a bow-tie — is split into its lobes. Two
+ * separate blocks of the same field whose edges cross are not one ring's problem at
+ * all, and no amount of un-kinking touches them; uniting the blocks is what resolves
+ * those. A field digitised as thirty blocks usually has both, so both are applied.
  */
 export function repairGeometry(geometry: PolyGeom): PolyGeom | null {
   const cleaned = normalize(geometry);
   if (!cleaned) return null;
   if (checkValidity(cleaned).ok) return cleaned;
+
+  // Un-kinking sees one part at a time, and one bad part used to abort the whole
+  // repair, so each is taken on its own and a part that cannot be split is kept as it
+  // is rather than lost.
+  const pieces = explode(cleaned).flatMap(unkinkPart);
+  if (pieces.length === 0) return null;
+
+  // And then the crossings between parts: where two blocks of one field overlap, the
+  // union makes a single outline with no crossing edges, which is also what stops the
+  // shared ground being counted twice.
+  const merged = unionAll(pieces) ?? combineParts(pieces);
+  const normalized = merged && normalize(merged);
+  if (!normalized) return null;
+  if (checkValidity(normalized).ok) return normalized;
+
+  // What is left is a pinch: lobes that still meet at the point they crossed at, which
+  // an OGC-valid polygon may not have. Pulling the outline in by a centimetre parts
+  // them for good, at a cost of well under a tenth of a percent of the area.
+  return separatePinchPoints(normalized) ?? normalized;
+}
+
+/** Slivers left along a crossing, as a share of the part they came out of. */
+const ARTEFACT_SHARE = 0.001;
+/** ... and never dropping anything above this, however small its parent part was. */
+const ARTEFACT_MIN_M2 = 1;
+
+/** Splits one part into non-crossing lobes, or returns it unchanged if it cannot be. */
+function unkinkPart(part: Polygon): PolyGeom[] {
+  const rings = withoutRepeatedVertices(part.coordinates);
+  if (!rings) return [];
+  const candidate: Polygon = { type: 'Polygon', coordinates: rings };
+  const before = area(feat(candidate));
   try {
-    const parts = unkinkPolygon(feat(cleaned) as Feature<Polygon | MultiPolygon>).features;
-    if (parts.length === 0) return null;
-    // Keep only the meaningful pieces: unkinking a bow-tie yields one large lobe and
-    // often hair-thin artefacts, so discard parts under 0.1% of the total.
-    const withArea = parts.map((p) => ({ geom: p.geometry as PolyGeom, a: area(p) }));
-    const total = withArea.reduce((s, p) => s + p.a, 0);
-    const keep = withArea.filter((p) => p.a > total * 0.001).map((p) => p.geom);
-    const merged = unionAll(keep.length ? keep : withArea.map((p) => p.geom));
-    if (!merged) return null;
-    const normalized = normalize(merged);
-    if (!normalized) return null;
-    if (checkValidity(normalized).ok) return normalized;
-    // The lobes of a bow-tie still meet at the crossing point, which is a pinch an
-    // OGC-valid polygon may not have. Pulling the outline in by a centimetre parts
-    // them for good, at a cost of well under a tenth of a percent of the area.
-    return separatePinchPoints(normalized) ?? largestPart(withArea);
+    const lobes = unkinkPolygon(feat(candidate) as Feature<Polygon>).features;
+    if (lobes.length === 0) return [candidate];
+    // Un-kinking leaves hair-thin artefacts along the crossing as well as the lobes.
+    // They are measured against the part they came out of, never against the whole
+    // field: a genuine half-hectare block beside a seventy-hectare one is not an
+    // artefact, and judging it against the total is how it used to be deleted.
+    const floor = Math.max(ARTEFACT_MIN_M2, before * ARTEFACT_SHARE);
+    const kept = lobes
+      .map((lobe) => ({ geom: lobe.geometry as PolyGeom, a: area(lobe) }))
+      .filter((lobe) => lobe.a > floor)
+      .map((lobe) => lobe.geom);
+    return kept.length > 0 ? kept : [candidate];
   } catch {
-    return cleaned;
+    return [candidate];
   }
+}
+
+/**
+ * Drops any coordinate a part visits more than once.
+ *
+ * A bow-tie that pinches — an outline returning to a point it has already passed
+ * through — repeats that coordinate, and the un-kinker refuses a polygon with any
+ * repeated vertex outright rather than splitting it, so a single pinch used to leave
+ * the whole field untouched. Dropping the second visit joins the segments either side
+ * of it, which loses nothing but the pinch. Rings are deduplicated together, because
+ * that is how the un-kinker counts them: a vertex an outer ring shares with its own
+ * hole trips it just the same.
+ */
+function withoutRepeatedVertices(rings: Position[][]): Position[][] | null {
+  const seen = new Set<string>();
+  const out: Position[][] = [];
+  for (const ring of rings) {
+    const body: Position[] = [];
+    for (const point of ring.slice(0, -1)) {
+      const key = `${point[0]},${point[1]}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      body.push(point);
+    }
+    // A ring reduced below a triangle no longer encloses anything worth keeping.
+    if (body.length < 3) {
+      if (out.length === 0) return null;
+      continue;
+    }
+    out.push([...body, body[0]]);
+  }
+  return out.length > 0 ? out : null;
+}
+
+/** Last resort when the union fails: the parts side by side, crossings and all. */
+function combineParts(pieces: PolyGeom[]): PolyGeom | null {
+  const coordinates = pieces.flatMap((piece) => toMultiPolygon(piece).coordinates);
+  return coordinates.length > 0 ? simplifyGeomType({ type: 'MultiPolygon', coordinates }) : null;
 }
 
 function separatePinchPoints(geometry: PolyGeom): PolyGeom | null {
@@ -313,14 +435,6 @@ function separatePinchPoints(geometry: PolyGeom): PolyGeom | null {
   } catch {
     return null;
   }
-}
-
-function largestPart(parts: { geom: PolyGeom; a: number }[]): PolyGeom | null {
-  const best = parts.reduce<{ geom: PolyGeom; a: number } | null>(
-    (winner, part) => (!winner || part.a > winner.a ? part : winner),
-    null,
-  );
-  return best ? normalize(best.geom) : null;
 }
 
 /* -------------------------------------------------------------------------- */

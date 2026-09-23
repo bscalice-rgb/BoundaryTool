@@ -13,7 +13,7 @@ import type {
   WField,
   Workspace,
 } from '../types';
-import type { InvalidReason } from './geo';
+import type { InvalidReason, ValidityReport } from './geo';
 import {
   areaHa,
   areaM2,
@@ -347,12 +347,7 @@ export function runChecks(
         kind: 'invalid-geometry',
         severity: 'blocking',
         title: t('flag.invalid.title', { feature: label }),
-        detail: t('flag.invalid.detail', {
-          reason:
-            validity.reason === 'kinks'
-              ? t.n('flag.invalid.kinks', validity.kinkCount)
-              : t(INVALID_KEYS[validity.reason]),
-        }),
+        detail: t('flag.invalid.detail', { reason: describeInvalid(validity, t) }),
         guidance: guidanceFor('invalid-geometry', t),
         featureIds: [feature.id],
         fieldIds: feature.fieldId ? [feature.fieldId] : [],
@@ -507,7 +502,17 @@ const INVALID_KEYS = {
   'short-ring': 'flag.invalid.shortRing',
   'not-closed': 'flag.invalid.notClosed',
   kinks: 'flag.invalid.noRings',
+  'self-overlap': 'flag.invalid.noRings',
 } as const satisfies Record<InvalidReason, StringKey>;
+
+/** Completes "The outline has …" with the count or area the reason is measured in. */
+function describeInvalid(validity: ValidityReport, t: Translator): string {
+  if (validity.reason === 'kinks') return t.n('flag.invalid.kinks', validity.kinkCount);
+  if (validity.reason === 'self-overlap') {
+    return t('flag.invalid.selfOverlap', { area: formatNum(validity.overlapM2) });
+  }
+  return t(INVALID_KEYS[validity.reason]);
+}
 
 export function describeField(field: WField, t: Translator = ambientT()): string {
   const name = field.field.trim();

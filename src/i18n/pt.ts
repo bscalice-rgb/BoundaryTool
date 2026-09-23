@@ -407,6 +407,7 @@ export const pt: Dictionary = {
   'flag.invalid.notClosed': 'um anel que não está fechado',
   'flag.invalid.kinks.one': '1 auto-interseção (formato de gravata)',
   'flag.invalid.kinks.other': '{count} auto-interseções (formato de gravata)',
+  'flag.invalid.selfOverlap': 'dois blocos sobrepostos entre si em {area} m², o que conta esse terreno duas vezes',
   'flag.sliver.title': '{feature} — fragmento ({area} ha)',
   'flag.sliver.detail':
     'Menor que o limite de {threshold} ha, então provavelmente é um resto de digitalização e ' +

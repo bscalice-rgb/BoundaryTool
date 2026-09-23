@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { Position } from 'geojson';
 import type { PolyGeom, Workspace } from '../types';
 import {
   autoAsciiNames,
@@ -14,7 +15,16 @@ import {
   runChecks,
   shrinkApart,
 } from '../lib/qa';
-import { areaHa, areaM2, checkValidity, overlapAreaM2, unionAll, vertexCount } from '../lib/geo';
+import {
+  areaHa,
+  areaM2,
+  checkValidity,
+  overlapAreaM2,
+  repairGeometry,
+  selfIntersections,
+  unionAll,
+  vertexCount,
+} from '../lib/geo';
 import { combineIntoField, deleteFeatures, newFeature, newField, updateField } from '../state/ops';
 import { poly, squareRing } from './fixtures';
 
@@ -85,6 +95,123 @@ describe('invalid geometry', () => {
     expect(runChecks(outcome.workspace).map((f) => f.kind)).not.toContain('invalid-geometry');
     // The input workspace is untouched, which is what makes undo a plain swap.
     expect(workspace).toEqual(before);
+  });
+
+  /* -- What a real estate boundary throws at it --------------------------- */
+
+  /** A block of `size` degrees with its bottom-left corner at (x, y). */
+  const block = (x: number, y: number, size: number): PolyGeom =>
+    poly([squareRing(x, y, size)]);
+
+  /**
+   * A bow-tie that pinches: the outline passes through the crossing point twice, so the
+   * coordinate is repeated. Digitising software produces these constantly, and the
+   * un-kinker refuses any polygon carrying one.
+   */
+  const pinchedBowTie = (x: number, y: number): PolyGeom =>
+    poly([
+      [
+        [x, y],
+        [x + 0.004, y],
+        [x + 0.002, y + 0.002],
+        [x + 0.004, y + 0.004],
+        [x, y + 0.004],
+        [x + 0.002, y + 0.002],
+        [x, y],
+      ],
+    ]);
+
+  const partsOf = (geometry: PolyGeom) =>
+    geometry.type === 'MultiPolygon' ? geometry.coordinates.length : 1;
+
+  it('does not call conjoined blocks self-intersecting', () => {
+    // Four blocks of one field in a row, each sharing a whole edge with the next. This
+    // is how an estate is drawn, and nothing about it is invalid — but comparing every
+    // ring against every other, which is what a MultiPolygon kink count does by
+    // default, reports a fault at every shared corner.
+    const row: PolyGeom = {
+      type: 'MultiPolygon',
+      coordinates: [0, 1, 2, 3].map(
+        (i) => (block(2.5 + i * 0.004, 48.8, 0.004) as { coordinates: Position[][] }).coordinates,
+      ),
+    };
+    expect(selfIntersections(row)).toBe(0);
+    expect(checkValidity(row).ok).toBe(true);
+    expect(runChecks(oneField([row])).map((f) => f.kind)).not.toContain('invalid-geometry');
+  });
+
+  it('splits a bow-tie that pinches instead of giving up on it', () => {
+    const geometry = pinchedBowTie(2.5, 48.8);
+    expect(selfIntersections(geometry)).toBeGreaterThan(0);
+
+    const fixed = repairGeometry(geometry)!;
+    expect(fixed).not.toBeNull();
+    expect(checkValidity(fixed).ok).toBe(true);
+    // Both lobes survive: the repair splits the bow-tie, it does not throw one away.
+    expect(areaHa(fixed)).toBeGreaterThan(areaHa(geometry) * 0.9);
+  });
+
+  it('fixes every bow-tie in a field of many blocks, not just the first', () => {
+    // Two pinched bow-ties among plain blocks, all of them touching their neighbours —
+    // the shape of a real estate file, where the fix used to clear some and stall.
+    const coordinates = [
+      block(2.5, 48.8, 0.004),
+      pinchedBowTie(2.504, 48.8),
+      block(2.508, 48.8, 0.004),
+      pinchedBowTie(2.512, 48.8),
+      block(2.516, 48.8, 0.004),
+    ].map((p) => (p as { coordinates: Position[][] }).coordinates);
+    const estate: PolyGeom = { type: 'MultiPolygon', coordinates };
+
+    expect(selfIntersections(estate)).toBeGreaterThan(1);
+
+    const fixed = repairGeometry(estate)!;
+    expect(selfIntersections(fixed)).toBe(0);
+    expect(checkValidity(fixed).ok).toBe(true);
+    // Every block is still there. Blocks that shared a whole edge come back as one
+    // outline rather than two, which is what uniting them means, so the area is what
+    // says nothing was lost rather than the number of parts.
+    expect(areaHa(fixed)).toBeGreaterThan(areaHa(estate) * 0.95);
+  });
+
+  it('keeps a small block that a big neighbour would dwarf', () => {
+    // The artefact filter used to measure each piece against the whole field, so a
+    // genuine block a fraction of the size of its neighbour was deleted as a sliver.
+    const coordinates = [
+      pinchedBowTie(2.5, 48.8),
+      block(2.6, 48.8, 0.02),
+      block(2.504, 48.8, 0.0002),
+    ].map((p) => (p as { coordinates: Position[][] }).coordinates);
+    const fixed = repairGeometry({ type: 'MultiPolygon', coordinates })!;
+
+    expect(checkValidity(fixed).ok).toBe(true);
+    const smallest = Math.min(
+      ...(fixed.type === 'MultiPolygon' ? fixed.coordinates : [fixed.coordinates]).map((rings) =>
+        areaHa({ type: 'Polygon', coordinates: rings } as PolyGeom),
+      ),
+    );
+    expect(smallest).toBeLessThan(0.1);
+  });
+
+  it('calls out two blocks of one field overlapping each other', () => {
+    const coordinates = [block(2.5, 48.8, 0.004), block(2.502, 48.8, 0.004)].map(
+      (p) => (p as { coordinates: Position[][] }).coordinates,
+    );
+    const doubled: PolyGeom = { type: 'MultiPolygon', coordinates };
+
+    // No ring crosses itself, so this is not a bow-tie — but the ground under the
+    // overlap is counted twice, which the export would carry into CropForce.
+    expect(selfIntersections(doubled)).toBe(0);
+    const validity = checkValidity(doubled);
+    expect(validity.ok).toBe(false);
+    expect(validity.reason).toBe('self-overlap');
+
+    const flag = runChecks(oneField([doubled])).find((f) => f.kind === 'invalid-geometry');
+    expect(flag?.detail).toContain('twice');
+
+    const fixed = repairGeometry(doubled)!;
+    expect(checkValidity(fixed).ok).toBe(true);
+    expect(partsOf(fixed)).toBe(1);
   });
 });
 

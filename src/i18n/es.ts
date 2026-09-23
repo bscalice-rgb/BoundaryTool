@@ -401,6 +401,7 @@ export const es: Dictionary = {
   'flag.invalid.notClosed': 'un anillo que no está cerrado',
   'flag.invalid.kinks.one': '1 autointersección (moño)',
   'flag.invalid.kinks.other': '{count} autointersecciones (moño)',
+  'flag.invalid.selfOverlap': 'dos bloques superpuestos entre sí por {area} m², lo que cuenta ese terreno dos veces',
   'flag.sliver.title': '{feature} — astilla ({area} ha)',
   'flag.sliver.detail':
     'Menor que el umbral de {threshold} ha, así que probablemente sea un fragmento de ' +

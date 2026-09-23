@@ -202,7 +202,7 @@ row. Features that belong to no field are not exported, and the quality panel sa
 |---|---|---|
 | Missing `Client` / `Farm` / `Field` | yes | none — jumps to the empty cell |
 | Field with no polygons assigned | yes | delete the row — and several at once from the panel |
-| Self-intersecting or invalid geometry | yes | un-kink and re-merge the outline |
+| Self-intersecting or invalid geometry | yes | split each bow-tie, then unite the parts |
 | Two fields overlapping | yes | three routes: trim the larger, trim one you pick, or shrink both apart |
 | The same boundary twice | yes | you pick which to keep; the other field and its polygons go |
 | Duplicate `Client`/`Farm`/`Field` | yes | number the surplus apart, or combine them if they are one field |
@@ -229,6 +229,35 @@ out by hand. Anything that survives neither — Cyrillic, CJK — is dropped rat
 guessed at, because no invented transliteration would be recognisable to the grower whose
 field it is. Two names that differed only by an accent become one name once folded, so the
 fix numbers them apart, exactly as the length fix does.
+
+### What counts as self-intersecting
+
+A field drawn as thirty blocks will have every block touching its neighbours, and that
+is not a fault — it is what conjoined blocks look like. It reads as one, though, if you
+count self-intersections the obvious way: flatten every ring of the MultiPolygon into
+one list and compare them pairwise, which is what the usual library call does, and every
+shared corner between two blocks is reported as a crossing. A real estate file can rack
+up fifty of them, none real and none fixable. So each part is measured on its own here,
+and only a part that crosses *itself* counts.
+
+That leaves a genuine fault the flattened count used to catch by accident: two blocks of
+one field overlapping each other, which is ground counted twice inside a single row. That
+is now checked for directly and reported in square metres, and the repair resolves it by
+uniting the two.
+
+The repair itself does both jobs, because a real file usually needs both. Each part is
+un-kinked on its own, so one part that cannot be split no longer aborts the whole fix,
+and then the parts are united, which is the only thing that resolves an overlap between
+two of them. Two details matter in practice:
+
+- A bow-tie that *pinches* — an outline passing back through a point it has already been
+  through — repeats that coordinate, and the un-kinker refuses any polygon carrying one
+  outright. A single pinch used to leave a whole field untouched. The repeated visit is
+  now dropped first, which loses nothing but the pinch.
+- Un-kinking leaves hair-thin slivers along the crossing as well as the lobes, and those
+  are discarded. They are measured against the part they came out of, never against the
+  whole field — judging them against the total is how a genuine half-hectare block next
+  to a seventy-hectare one used to get deleted as a sliver.
 
 ### Three ways out of an overlap
 

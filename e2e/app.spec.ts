@@ -506,6 +506,25 @@ test.describe('the three ways out of an overlap', () => {
   });
 });
 
+test('clears every bow-tie in an estate of touching blocks in one go', async ({ page }) => {
+  await page.goto('/');
+  await page.setInputFiles('input[type=file]', join(FIXTURE_DIR, 'estate.geojson'));
+  await page.getByRole('button', { name: 'Add to workspace' }).click();
+
+  // Blocks that share an edge are not a fault, so only the two real bow-ties are
+  // counted — and the count is what the one Auto-fix has to clear.
+  const flag = page.locator('article', { hasText: 'invalid geometry' });
+  await expect(flag).toBeVisible();
+  await expect(flag).toContainText('self-intersections');
+
+  await flag.getByRole('button', { name: 'Auto-fix' }).click();
+  await expect(flag).toBeHidden();
+  await expect(page.getByText('0 blocking')).toBeVisible();
+
+  await page.keyboard.press('Control+z');
+  await expect(page.locator('article', { hasText: 'invalid geometry' })).toBeVisible();
+});
+
 test.describe('working one file at a time', () => {
   /** The three sample files land as four fields, which is three different sources. */
   async function importAsFields(page: Page) {
