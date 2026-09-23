@@ -517,9 +517,19 @@ test('clears every bow-tie in an estate of touching blocks in one go', async ({ 
   await expect(flag).toBeVisible();
   await expect(flag).toContainText('self-intersections');
 
+  const areaBefore = await page.locator('text=/ha$/').first().innerText();
+
   await flag.getByRole('button', { name: 'Auto-fix' }).click();
+  // One click, not several: nothing is left over for a second pass.
   await expect(flag).toBeHidden();
   await expect(page.getByText('0 blocking')).toBeVisible();
+
+  // The exclusion zones inside the block are still carved out of it, so the area has
+  // barely moved. Filling them in would show up here as a jump.
+  const areaAfter = await page.locator('text=/ha$/').first().innerText();
+  const ha = (text: string) => Number(text.replace(/[^\d.]/g, ''));
+  expect(ha(areaAfter)).toBeGreaterThan(ha(areaBefore) * 0.97);
+  expect(ha(areaAfter)).toBeLessThan(ha(areaBefore) * 1.03);
 
   await page.keyboard.press('Control+z');
   await expect(page.locator('article', { hasText: 'invalid geometry' })).toBeVisible();

@@ -217,22 +217,28 @@ export function bboxesOverlap(a: BBox, b: BBox): boolean {
 /* Validity                                                                    */
 /* -------------------------------------------------------------------------- */
 
+/** Self-intersections of one ring taken on its own. */
+function ringKinks(ring: Position[]): number {
+  return kinks(feat({ type: 'Polygon', coordinates: [ring] }) as Feature<Polygon>).features.length;
+}
+
 /**
- * Self-intersections, counted one part at a time.
+ * Self-intersections, counted one ring at a time.
  *
- * Handed a MultiPolygon, turf flattens every ring of every part into one list and
- * compares them pairwise, so two blocks of the same field that share a boundary — which
- * is exactly what conjoined blocks do — are reported as self-intersections. A field
- * digitised as thirty touching blocks can rack up dozens of them, none of them real and
- * none of them fixable, which is worse than not checking at all. Only a part crossing
- * itself is a fault, so each part is measured on its own.
+ * Handed anything with more than one ring, turf flattens them all into one list and
+ * compares them pairwise, so every place two rings touch is reported as a crossing.
+ * Both things that touch are ordinary: two blocks of one field sharing a boundary, and
+ * — far more of them — the exclusion zones inside a plantation block, which sit against
+ * each other and against the block edge in their hundreds. A real estate file racks up
+ * thousands that way, none of them a fault and none of them fixable.
+ *
+ * A ring crossing *itself* is the fault, and that is what this counts. Whether rings sit
+ * inside one another properly is a different question, and a zero-width buffer answers
+ * it far better than a crossing count can.
  */
 export function selfIntersections(geometry: PolyGeom): number {
   try {
-    return explode(geometry).reduce(
-      (sum, part) => sum + kinks(feat(part) as Feature<Polygon>).features.length,
-      0,
-    );
+    return allRings(geometry).reduce((sum, ring) => sum + ringKinks(ring), 0);
   } catch {
     return 0;
   }
@@ -255,16 +261,20 @@ export const SELF_OVERLAP_MIN_M2 = 1;
 export function selfOverlapM2(geometry: PolyGeom): number {
   const parts = explode(geometry);
   if (parts.length < 2) return 0;
+
+  // Nearly every outline is settled here: parts whose bounding boxes miss each other
+  // cannot overlap, and on a field of separate blocks that is all of them.
   const boxes = parts.map((part) => bboxOf(part));
-  let total = 0;
-  for (let i = 0; i < parts.length; i++) {
-    for (let j = i + 1; j < parts.length; j++) {
-      if (!bboxesOverlap(boxes[i], boxes[j])) continue;
-      total += overlapAreaM2(parts[i], parts[j]);
-      if (total > SELF_OVERLAP_MIN_M2) return total;
-    }
-  }
-  return total;
+  const near = boxes.some((box, i) =>
+    boxes.some((other, j) => j > i && bboxesOverlap(box, other)),
+  );
+  if (!near) return 0;
+
+  // Otherwise: what the parts claim between them, against what they cover. Comparing
+  // every pair instead would mean intersecting outlines that carry a thousand
+  // exclusion zones each, which costs five times as long on the worst real file.
+  const merged = unionAll(parts);
+  return merged ? Math.max(0, areaM2(geometry) - areaM2(merged)) : 0;
 }
 
 /** Why an outline is unusable, as a code the UI turns into words in its own language. */
@@ -328,76 +338,162 @@ function computeValidity(geometry: PolyGeom): ValidityReport {
 /**
  * Repairs a self-intersecting outline.
  *
- * Two different faults both read as "self-intersecting", and they need different
- * answers. A ring that crosses itself — a bow-tie — is split into its lobes. Two
- * separate blocks of the same field whose edges cross are not one ring's problem at
- * all, and no amount of un-kinking touches them; uniting the blocks is what resolves
- * those. A field digitised as thirty blocks usually has both, so both are applied.
+ * The workhorse is a zero-width buffer, which is the canonical way to make a polygon
+ * valid: JTS rebuilds the shape from its edges, so self-crossing and overlapping rings
+ * come back as a proper outer-and-holes structure with the area unchanged. On a
+ * plantation block carrying four hundred exclusion zones that is the only thing that
+ * works — un-kinking each part instead either gives up or fills every hole in.
+ *
+ * Around it sit three corrections, each for something the buffer alone gets wrong: an
+ * exclusion zone it hands back still crossing, parts of one outline that overlap each
+ * other, and a ring drawn as a figure of eight, where it keeps the lobe wound the right
+ * way and drops the other.
  */
 export function repairGeometry(geometry: PolyGeom): PolyGeom | null {
+  if (!hasAnyRing(geometry)) return null;
   const cleaned = normalize(geometry);
-  if (!cleaned) return null;
-  if (checkValidity(cleaned).ok) return cleaned;
+  if (cleaned && checkValidity(cleaned).ok) return cleaned;
 
-  // Un-kinking sees one part at a time, and one bad part used to abort the whole
-  // repair, so each is taken on its own and a part that cannot be split is kept as it
-  // is rather than lost.
-  const pieces = explode(cleaned).flatMap(unkinkPart);
-  if (pieces.length === 0) return null;
+  // The buffer is given the outline exactly as it stands, not a tidied copy. Tidying
+  // strips vertices that sit in a straight line, and where two rings share those
+  // vertices — which is most of a plantation block, holes packed against each other
+  // and against the edge — dropping one moves the line and opens a crossing that was
+  // never there. Measured across fifteen real estate files: buffering the untouched
+  // outline clears every crossing, and buffering a tidied copy leaves dozens.
+  const buffered = normalize(zeroWidthBuffer(geometry) ?? geometry) ?? cleaned;
+  if (!buffered) return null;
 
-  // And then the crossings between parts: where two blocks of one field overlap, the
-  // union makes a single outline with no crossing edges, which is also what stops the
-  // shared ground being counted twice.
-  const merged = unionAll(pieces) ?? combineParts(pieces);
-  const normalized = merged && normalize(merged);
-  if (!normalized) return null;
-  if (checkValidity(normalized).ok) return normalized;
+  // The buffer derives the holes afresh, and the odd figure-of-eight exclusion zone
+  // comes back out of it still crossing. Splitting one of those in two is a local edit
+  // that cannot disturb anything else, so nothing is rebuilt or re-tidied afterwards.
+  const split = splitCrossingRings(buffered);
 
-  // What is left is a pinch: lobes that still meet at the point they crossed at, which
-  // an OGC-valid polygon may not have. Pulling the outline in by a centimetre parts
-  // them for good, at a cost of well under a tenth of a percent of the area.
-  return separatePinchPoints(normalized) ?? normalized;
+  // Parts that overlap each other are ground counted twice inside one outline, and
+  // uniting them is the only thing that resolves it. The check that finds them is the
+  // expensive half of a validity report, so the report is what asks for it — and on
+  // the usual outline, where there is nothing to dissolve, the answer is reused below
+  // rather than worked out twice.
+  const tidied =
+    checkValidity(split).reason === 'self-overlap'
+      ? (normalize(unionAll(explode(split)) ?? split) ?? split)
+      : split;
+
+  // The buffer's one blind spot is a ring drawn as a figure of eight: it keeps the lobe
+  // wound the right way and drops the other, which halves the field. Un-kinking keeps
+  // both, and on an outline with no exclusion zones it costs nothing to try, so the two
+  // are compared on the ground they keep. A block carrying four hundred holes skips it:
+  // un-kinking fills every one of them in, and outlines with holes do not lose area to
+  // the buffer anyway.
+  const alternative =
+    ringCount(buffered).holes === 0 && cleaned ? normalize(unkinkEverything(cleaned)) : null;
+  if (alternative && checkValidity(alternative).ok && areaM2(alternative) > areaM2(tidied) * 1.01) {
+    return alternative;
+  }
+  if (checkValidity(tidied).ok) return tidied;
+
+  // Still crossing. Un-kinking every part is the blunt answer and holes do not survive
+  // it, so it has to be clearly better — not merely valid — before it is worth the
+  // exclusion zones it costs.
+  const forced = normalize(unkinkEverything(tidied));
+  if (
+    forced &&
+    checkValidity(forced).ok &&
+    ringCount(forced).holes >= ringCount(tidied).holes * FALLBACK_HOLE_FLOOR
+  ) {
+    return forced;
+  }
+  return tidied;
 }
 
-/** Slivers left along a crossing, as a share of the part they came out of. */
-const ARTEFACT_SHARE = 0.001;
-/** ... and never dropping anything above this, however small its parent part was. */
-const ARTEFACT_MIN_M2 = 1;
+/**
+ * Share of the exclusion zones the blunt fallback has to leave standing before its
+ * result is worth taking. It fills them in, and four hundred of them are not worth
+ * trading for the last two crossings; on an outline with no holes it costs nothing.
+ */
+const FALLBACK_HOLE_FLOOR = 0.5;
 
-/** Splits one part into non-crossing lobes, or returns it unchanged if it cannot be. */
-function unkinkPart(part: Polygon): PolyGeom[] {
-  const rings = withoutRepeatedVertices(part.coordinates);
-  if (!rings) return [];
-  const candidate: Polygon = { type: 'Polygon', coordinates: rings };
-  const before = area(feat(candidate));
+/** JTS's own polygon repair: rebuild the shape from its edges, changing nothing else. */
+function zeroWidthBuffer(geometry: PolyGeom): PolyGeom | null {
   try {
-    const lobes = unkinkPolygon(feat(candidate) as Feature<Polygon>).features;
-    if (lobes.length === 0) return [candidate];
-    // Un-kinking leaves hair-thin artefacts along the crossing as well as the lobes.
-    // They are measured against the part they came out of, never against the whole
-    // field: a genuine half-hectare block beside a seventy-hectare one is not an
-    // artefact, and judging it against the total is how it used to be deleted.
-    const floor = Math.max(ARTEFACT_MIN_M2, before * ARTEFACT_SHARE);
-    const kept = lobes
-      .map((lobe) => ({ geom: lobe.geometry as PolyGeom, a: area(lobe) }))
-      .filter((lobe) => lobe.a > floor)
-      .map((lobe) => lobe.geom);
-    return kept.length > 0 ? kept : [candidate];
+    const out = buffer(feat(geometry), 0, { units: 'meters' });
+    return (out?.geometry as PolyGeom) ?? null;
   } catch {
-    return [candidate];
+    return null;
   }
 }
 
 /**
- * Drops any coordinate a part visits more than once.
+ * Splits every ring that crosses itself into its lobes, in place.
+ *
+ * A hole's lobes stay holes of the same part, so an exclusion zone drawn as a figure of
+ * eight becomes two exclusion zones rather than disappearing. When an outer ring
+ * splits, each lobe becomes a part of its own and takes the holes that fall inside it.
+ *
+ * Nothing else about the shape is touched — sorting out which ring sits inside which is
+ * the buffer's job, and it is far better at it than any ring-by-ring rule.
+ */
+function splitCrossingRings(geometry: PolyGeom): PolyGeom {
+  const parts: Position[][][] = [];
+  for (const part of explode(geometry)) {
+    const [outer, ...holes] = part.coordinates;
+    // A lobe of a hole that still crosses itself after splitting is beyond saving, and
+    // an exclusion zone is a small thing to lose: dropping it puts that ground back
+    // into the field and costs a fraction of a hectare. The outer ring is never
+    // dropped — better a field that is still flagged than no field at all.
+    const splitHoles = holes.flatMap((hole) =>
+      splitRing(hole).filter((piece) => ringKinks(piece) === 0),
+    );
+    const lobes = splitRing(outer);
+    if (lobes.length < 2) {
+      parts.push([outer, ...splitHoles]);
+      continue;
+    }
+    for (const lobe of lobes) {
+      parts.push([lobe, ...splitHoles.filter((hole) => ringStartsInside(hole, lobe))]);
+    }
+  }
+  return parts.length > 0
+    ? simplifyGeomType({ type: 'MultiPolygon', coordinates: parts })
+    : geometry;
+}
+
+/** One ring in, its non-crossing lobes out — or just itself when it does not cross. */
+function splitRing(ring: Position[]): Position[][] {
+  if (ringKinks(ring) === 0) return [ring];
+  const deduped = withoutRepeatedVertices([ring]);
+  if (!deduped) return [ring];
+  try {
+    const lobes = unkinkPolygon(
+      feat({ type: 'Polygon', coordinates: deduped }) as Feature<Polygon>,
+    ).features;
+    const outers = lobes
+      .map((lobe) => (lobe.geometry as Polygon).coordinates[0])
+      .filter((lobe) => lobe.length >= 4);
+    return outers.length > 0 ? outers : [ring];
+  } catch {
+    return [ring];
+  }
+}
+
+/** Ray casting, to place a hole against the lobe of a split outer ring. */
+function ringStartsInside(ring: Position[], outer: Position[]): boolean {
+  const [x, y] = ring[0];
+  let inside = false;
+  for (let i = 0, j = outer.length - 1; i < outer.length; j = i++) {
+    const [xi, yi] = outer[i];
+    const [xj, yj] = outer[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Drops any coordinate a ring visits more than once.
  *
  * A bow-tie that pinches — an outline returning to a point it has already passed
- * through — repeats that coordinate, and the un-kinker refuses a polygon with any
- * repeated vertex outright rather than splitting it, so a single pinch used to leave
- * the whole field untouched. Dropping the second visit joins the segments either side
- * of it, which loses nothing but the pinch. Rings are deduplicated together, because
- * that is how the un-kinker counts them: a vertex an outer ring shares with its own
- * hole trips it just the same.
+ * through — repeats that coordinate, and the un-kinker refuses a polygon carrying any
+ * repeated vertex outright rather than splitting it. Dropping the second visit joins
+ * the segments either side of it, which loses nothing but the pinch.
  */
 function withoutRepeatedVertices(rings: Position[][]): Position[][] | null {
   const seen = new Set<string>();
@@ -420,21 +516,30 @@ function withoutRepeatedVertices(rings: Position[][]): Position[][] | null {
   return out.length > 0 ? out : null;
 }
 
-/** Last resort when the union fails: the parts side by side, crossings and all. */
-function combineParts(pieces: PolyGeom[]): PolyGeom | null {
-  const coordinates = pieces.flatMap((piece) => toMultiPolygon(piece).coordinates);
-  return coordinates.length > 0 ? simplifyGeomType({ type: 'MultiPolygon', coordinates }) : null;
-}
+/** Slivers left along a crossing, as a share of the part they came out of. */
+const ARTEFACT_SHARE = 0.001;
+/** ... and never dropping anything above this, however small its parent part was. */
+const ARTEFACT_MIN_M2 = 1;
 
-function separatePinchPoints(geometry: PolyGeom): PolyGeom | null {
-  try {
-    const shrunk = buffer(feat(geometry), -0.01, { units: 'meters', steps: 2 });
-    if (!shrunk?.geometry) return null;
-    const result = normalize(shrunk.geometry as PolyGeom);
-    return result && checkValidity(result).ok ? result : null;
-  } catch {
-    return null;
+/** The blunt fallback: un-kink every part and unite the lobes. Holes do not survive. */
+function unkinkEverything(geometry: PolyGeom): PolyGeom {
+  const pieces: PolyGeom[] = [];
+  for (const part of explode(geometry)) {
+    const rings = withoutRepeatedVertices(part.coordinates);
+    const candidate: Polygon = { type: 'Polygon', coordinates: rings ?? part.coordinates };
+    try {
+      const lobes = unkinkPolygon(feat(candidate) as Feature<Polygon>).features;
+      const floor = Math.max(ARTEFACT_MIN_M2, area(feat(candidate)) * ARTEFACT_SHARE);
+      const kept = lobes
+        .map((lobe) => ({ geom: lobe.geometry as PolyGeom, a: area(lobe) }))
+        .filter((lobe) => lobe.a > floor)
+        .map((lobe) => lobe.geom);
+      pieces.push(...(kept.length > 0 ? kept : [candidate]));
+    } catch {
+      pieces.push(candidate);
+    }
   }
+  return unionAll(pieces) ?? geometry;
 }
 
 /* -------------------------------------------------------------------------- */

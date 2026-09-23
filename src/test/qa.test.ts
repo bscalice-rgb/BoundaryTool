@@ -19,6 +19,7 @@ import {
   areaHa,
   areaM2,
   checkValidity,
+  ringCount,
   overlapAreaM2,
   repairGeometry,
   selfIntersections,
@@ -191,6 +192,67 @@ describe('invalid geometry', () => {
       ),
     );
     expect(smallest).toBeLessThan(0.1);
+  });
+
+  /* -- What a plantation block throws at it -------------------------------- */
+
+  /**
+   * A block carrying a grid of exclusion zones — roads, buildings, unplantable ground —
+   * which is what a palm estate looks like. `pinched` of them are drawn as figures of
+   * eight, and `gap` says whether the zones butt up against each other or leave a strip
+   * of crop between them.
+   */
+  function plantationBlock(pinched: number, gap = 0): PolyGeom {
+    const step = 0.0004;
+    const size = step - gap;
+    const holes: Position[][] = [];
+    for (let row = 0; row < 6; row += 1) {
+      for (let col = 0; col < 6; col += 1) {
+        const x = 100.5 + col * step;
+        const y = 0.8 + row * step;
+        holes.push(
+          holes.length < pinched
+            ? // A zone drawn as a figure of eight, crossing itself in the middle.
+              [[x, y], [x + size, y + size], [x + size, y], [x, y + size], [x, y]]
+            : squareRing(x, y, size).slice().reverse(),
+        );
+      }
+    }
+    return poly([squareRing(100.4998, 0.7998, 0.0028), ...holes]);
+  }
+
+  it('does not call a block full of touching exclusion zones self-intersecting', () => {
+    // Every zone shares an edge with its neighbours. Comparing rings pairwise — which
+    // is what a polygon kink count does by default — reports a crossing at every shared
+    // corner, hundreds of them, none of them a fault and none of them fixable. A real
+    // estate file reaches two and a half thousand that way.
+    const clean = plantationBlock(0);
+    expect(ringCount(clean).holes).toBe(36);
+    expect(selfIntersections(clean)).toBe(0);
+    expect(checkValidity(clean).ok).toBe(true);
+  });
+
+  it('keeps the exclusion zones when it repairs the block around them', () => {
+    // The repair used to unite the parts, which filled every hole in: a plantation
+    // block came back with its roads and buildings counted as planted ground.
+    const block = plantationBlock(2, 0.0001);
+    const intact = plantationBlock(0, 0.0001);
+    expect(selfIntersections(block)).toBeGreaterThan(0);
+
+    const fixed = repairGeometry(block)!;
+    expect(checkValidity(fixed).ok).toBe(true);
+    // The two crossed zones are split or dropped; the other 34 are left alone.
+    expect(ringCount(fixed).holes).toBeGreaterThanOrEqual(34);
+    // And the ground is still carved out rather than paved over.
+    expect(areaHa(fixed)).toBeLessThan(areaHa(intact) * 1.05);
+  });
+
+  it('repairs a boundary in one pass rather than most of one', () => {
+    // Clicking the fix twice must not find more to do the second time.
+    const fixed = repairGeometry(plantationBlock(4, 0.0001))!;
+    const again = repairGeometry(fixed)!;
+    expect(selfIntersections(fixed)).toBe(0);
+    expect(areaHa(again)).toBeCloseTo(areaHa(fixed), 6);
   });
 
   it('calls out two blocks of one field overlapping each other', () => {

@@ -232,32 +232,52 @@ fix numbers them apart, exactly as the length fix does.
 
 ### What counts as self-intersecting
 
-A field drawn as thirty blocks will have every block touching its neighbours, and that
-is not a fault — it is what conjoined blocks look like. It reads as one, though, if you
-count self-intersections the obvious way: flatten every ring of the MultiPolygon into
-one list and compare them pairwise, which is what the usual library call does, and every
-shared corner between two blocks is reported as a crossing. A real estate file can rack
-up fifty of them, none real and none fixable. So each part is measured on its own here,
-and only a part that crosses *itself* counts.
+Count self-intersections the obvious way — flatten every ring of a polygon into one list
+and compare them pairwise, which is what the usual library call does — and every place
+two rings *touch* is reported as a crossing. Two things touch constantly and neither is a
+fault: blocks of one field sharing a boundary, and, far more of them, the exclusion zones
+inside a plantation block, which sit against each other and against the block edge in
+their hundreds. A real palm-estate file reaches **two and a half thousand** reported
+crossings that way, none of them real and none of them fixable by anything.
 
-That leaves a genuine fault the flattened count used to catch by accident: two blocks of
-one field overlapping each other, which is ground counted twice inside a single row. That
-is now checked for directly and reported in square metres, and the repair resolves it by
-uniting the two.
+So each ring is measured on its own here. A ring crossing *itself* is the fault, and that
+is all this counts. Whether rings sit inside one another properly is a different question,
+and a zero-width buffer answers it far better than a crossing count can.
 
-The repair itself does both jobs, because a real file usually needs both. Each part is
-un-kinked on its own, so one part that cannot be split no longer aborts the whole fix,
-and then the parts are united, which is the only thing that resolves an overlap between
-two of them. Two details matter in practice:
+That leaves one genuine fault the flattened count used to catch by accident: two parts of
+one outline overlapping each other, which is ground counted twice inside a single row.
+That is checked for directly, reported in square metres, and resolved by uniting the two.
+Finding it means comparing parts, which is expensive on a block carrying a thousand
+exclusion zones, so it starts with a bounding-box sweep — on a field of separate blocks
+nothing overlaps and the answer is immediate — and otherwise asks one union what the
+parts actually cover, rather than intersecting every pair.
 
-- A bow-tie that *pinches* — an outline passing back through a point it has already been
-  through — repeats that coordinate, and the un-kinker refuses any polygon carrying one
-  outright. A single pinch used to leave a whole field untouched. The repeated visit is
-  now dropped first, which loses nothing but the pinch.
-- Un-kinking leaves hair-thin slivers along the crossing as well as the lobes, and those
-  are discarded. They are measured against the part they came out of, never against the
-  whole field — judging them against the total is how a genuine half-hectare block next
-  to a seventy-hectare one used to get deleted as a sliver.
+### Repairing a boundary
+
+The repair is a **zero-width buffer**, which is the canonical way to make a polygon valid:
+JTS rebuilds the shape from its edges, so self-crossing and overlapping rings come back as
+a proper outer-and-holes structure with the area unchanged. On the fifteen estate files
+this was built against it clears every crossing — 2,816 down to none on the worst — while
+keeping the hectares to the second decimal and rebuilding 460 exclusion zones into the
+1,396 that were really drawn there. Un-kinking each part instead, which is what it used to
+do, either gave up or filled every hole in.
+
+Three things sit around it, each for something the buffer alone gets wrong:
+
+- **It is given the outline exactly as it stands**, not a tidied copy. Tidying strips
+  vertices that sit in a straight line, and where two rings share those vertices —
+  most of a plantation block — dropping one moves the line and opens a crossing that was
+  never there. Buffering the untouched outline clears all fifteen files; buffering a
+  tidied copy leaves dozens of crossings behind.
+- **An exclusion zone handed back still crossing** is split into its lobes, and a lobe
+  that still crosses after that is dropped. Losing one 370 m² zone puts that ground back
+  into the field; leaving it keeps the whole field flagged forever.
+- **A ring drawn as a figure of eight** winds one lobe against the other, and JTS keeps
+  only the lobe wound the right way — quietly halving the field. Un-kinking keeps both, so
+  on an outline with no exclusion zones the two are compared on the ground they keep.
+
+The worst of the fifteen takes under half a second, and one click is one click: repairing
+an already-repaired boundary finds nothing more to do.
 
 ### Three ways out of an overlap
 

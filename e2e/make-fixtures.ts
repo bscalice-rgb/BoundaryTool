@@ -138,7 +138,8 @@ export async function writeFixtures(): Promise<void> {
   );
 
   // 6. An estate drawn as touching blocks, two of them bow-tied through a repeated
-  //     vertex — the shape a real plantation file arrives in.
+  //     vertex, and one block carrying a grid of exclusion zones with two of those
+  //     drawn as figures of eight — the shape a real plantation file arrives in.
   const pinched = (x: number, y: number, size: number): Position[] => [
     [x, y],
     [x + size, y],
@@ -148,6 +149,25 @@ export async function writeFixtures(): Promise<void> {
     [x + size / 2, y + size / 2],
     [x, y],
   ];
+  /** Roads and buildings inside a block: a grid of zones, two of them self-crossing. */
+  const exclusionZones = (x0: number, y0: number): Position[][] => {
+    const step = 0.0006;
+    const size = 0.0004;
+    const zones: Position[][] = [];
+    for (let row = 0; row < 5; row += 1) {
+      for (let col = 0; col < 5; col += 1) {
+        const x = x0 + col * step;
+        const y = y0 + row * step;
+        zones.push(
+          zones.length < 2
+            ? [[x, y], [x + size, y + size], [x + size, y], [x, y + size], [x, y]]
+            : [[x, y], [x, y + size], [x + size, y + size], [x + size, y], [x, y]],
+        );
+      }
+    }
+    return zones;
+  };
+
   writeFileSync(
     join(FIXTURE_DIR, 'estate.geojson'),
     JSON.stringify({
@@ -158,7 +178,7 @@ export async function writeFixtures(): Promise<void> {
         coordinates: [
           [ring(100.5, 0.8, 0.004)],
           [pinched(100.504, 0.8, 0.004)],
-          [ring(100.508, 0.8, 0.004)],
+          [ring(100.508, 0.8, 0.004), ...exclusionZones(100.5085, 0.8005)],
           [pinched(100.512, 0.8, 0.004)],
           [ring(100.516, 0.8, 0.004)],
         ],
