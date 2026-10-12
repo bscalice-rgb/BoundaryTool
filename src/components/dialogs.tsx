@@ -25,6 +25,8 @@ import type { OverlapStrategy, ShrinkPreview } from '../lib/qa';
 import {
   MAX_INSET_M,
   describeField,
+  nameKey,
+  uniqueFieldName,
   fieldAreaM2,
   largerOf,
   previewShrinkApart,
@@ -584,6 +586,107 @@ export function OverlapDialog({
           onClick={resolve}
         >
           {t(strategy === 'shrink-both' ? 'overlap.confirmShrink' : 'overlap.confirm')}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+export type NameRoute = 'merge' | 'number';
+
+/**
+ * Settles fields that share a Client/Farm/Field name, one way or the other.
+ *
+ * Which way is not something the tool can know: two rows called "Block 1" are either
+ * one field farmed in two pieces or two fields that happen to share a name, and
+ * guessing wrong either merges neighbours or splits a field. So it asks — once. The
+ * answer can be applied to every name that repeats, which is what makes a batch of
+ * forty collisions one decision instead of forty, and each name is still only ever
+ * merged with itself.
+ */
+export function NameCollisionDialog({
+  fields,
+  otherGroups,
+  workspace,
+  onResolve,
+  onCancel,
+}: {
+  /** The colliding fields this dialog was opened on. */
+  fields: WField[];
+  /** Every other name that repeats, as groups of fields, for "do the same for all". */
+  otherGroups: WField[][];
+  workspace: Workspace;
+  onResolve: (route: NameRoute, everyName: boolean) => void;
+  onCancel: () => void;
+}) {
+  const t = useT();
+  const [route, setRoute] = useState<NameRoute>('merge');
+  const [everyName, setEveryName] = useState(true);
+  const first = fields[0];
+
+  // What numbering would actually call the second one, rather than a made-up example.
+  const example = useMemo(() => {
+    const taken = new Set(workspace.fields.map(nameKey));
+    return fields[1] ? uniqueFieldName(fields[1], taken) : '';
+  }, [fields, workspace.fields]);
+
+  const totalFields = otherGroups.reduce((sum, group) => sum + group.length, fields.length);
+
+  return (
+    <Modal title={t('names.title')} onClose={onCancel} width="max-w-md">
+      <p className="text-xs leading-relaxed text-ink-300">
+        {t('names.intro', { count: fields.length, name: describeField(first, t) })}
+      </p>
+
+      <fieldset className="mt-3">
+        <legend className="text-[11px] font-semibold text-ink-100">{t('names.strategy')}</legend>
+        <div className="mt-2 space-y-1.5">
+          <Choice name="route" checked={route === 'merge'} onSelect={() => setRoute('merge')}>
+            <span className="min-w-0">
+              <span className="block text-xs font-medium text-ink-100">{t('names.merge')}</span>
+              <span className="mt-0.5 block text-[11px] leading-relaxed text-ink-400">
+                {t('names.merge.detail')}
+              </span>
+            </span>
+          </Choice>
+          <Choice name="route" checked={route === 'number'} onSelect={() => setRoute('number')}>
+            <span className="min-w-0">
+              <span className="block text-xs font-medium text-ink-100">{t('names.number')}</span>
+              <span className="mt-0.5 block text-[11px] leading-relaxed text-ink-400">
+                {t('names.number.detail', { example: `“${example}”` })}
+              </span>
+            </span>
+          </Choice>
+        </div>
+      </fieldset>
+
+      {otherGroups.length > 0 && (
+        <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-md border
+          border-ink-700 p-2.5">
+          <input
+            type="checkbox"
+            checked={everyName}
+            onChange={(event) => setEveryName(event.target.checked)}
+            className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-crop-500"
+          />
+          <span className="min-w-0">
+            <span className="block text-xs text-ink-100">
+              {t('names.all', { groups: otherGroups.length + 1, fields: totalFields })}
+            </span>
+            <span className="mt-0.5 block text-[11px] leading-relaxed text-ink-400">
+              {t('names.all.hint')}
+            </span>
+          </span>
+        </label>
+      )}
+
+      <div className="mt-4 flex justify-end gap-2">
+        <Button onClick={onCancel}>{t('import.cancel')}</Button>
+        <Button
+          tone="primary"
+          onClick={() => onResolve(route, otherGroups.length > 0 && everyName)}
+        >
+          {t(route === 'merge' ? 'names.confirmMerge' : 'names.confirmNumber')}
         </Button>
       </div>
     </Modal>

@@ -1,7 +1,7 @@
 import type { BBox } from 'geojson';
 import { ambientT } from '../i18n/translator';
 import type { StringKey, Translator } from '../i18n/translator';
-import { deleteFields } from '../state/ops';
+import { deleteFields, mergeFieldGroups } from '../state/ops';
 import { hasNonAscii, nonAsciiCharacters, toAscii } from './text';
 import { NAME_LIMIT } from '../types';
 import type {
@@ -562,6 +562,45 @@ export function nameKey(field: Pick<WField, 'client' | 'farm' | 'field'>): strin
   return [field.client, field.farm, field.field]
     .map((value) => value.trim().toLowerCase().replace(/\s+/g, ' '))
     .join(' | ');
+}
+
+/**
+ * The given fields, grouped by the name CropForce keys them on — Client, Farm and
+ * Field together, ignoring case and spacing, exactly as the duplicate check compares
+ * them. Only groups of two or more come back: a name nobody else has needs nothing.
+ * Groups keep workspace order, so the first field of each is the one already listed
+ * first.
+ */
+export function sameNameGroups(workspace: Workspace, fieldIds: FieldId[]): FieldId[][] {
+  const wanted = new Set(fieldIds);
+  const byName = new Map<string, FieldId[]>();
+  for (const field of workspace.fields) {
+    if (!wanted.has(field.id)) continue;
+    const key = nameKey(field);
+    byName.set(key, [...(byName.get(key) ?? []), field.id]);
+  }
+  return [...byName.values()].filter((group) => group.length > 1);
+}
+
+/**
+ * Merges fields that share a name, one field per name. The other resolution to a
+ * name collision: where numbering apart says "these are different fields", this says
+ * "these are one field farmed in separate blocks". Each name is only ever merged with
+ * itself — every "1" with the other "1"s, every "2" with the "2"s.
+ */
+export function autoMergeNames(
+  workspace: Workspace,
+  fieldIds: FieldId[],
+  t: Translator = ambientT(),
+): FixOutcome {
+  const groups = sameNameGroups(workspace, fieldIds);
+  if (groups.length === 0) return { workspace, message: t('fix.mergedNone'), ok: false };
+  const fields = groups.reduce((sum, group) => sum + group.length, 0);
+  return {
+    workspace: mergeFieldGroups(workspace, groups),
+    message: t.n('fix.merged', groups.length, { fields }),
+    ok: true,
+  };
 }
 
 /**

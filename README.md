@@ -98,9 +98,9 @@ call anything.
    table and one MultiPolygon in the export. It can be built from any number of
    polygons, from any number of source files, with holes cut into any of them. What
    counts as one field is always your decision — the tool never guesses. Two imported
-   polygons that share a name are **not** merged: that is far more often two fields
-   whose names collide than one field in two pieces, and the duplicate-name check puts
-   the choice in front of you.
+   polygons that share a name are **not** merged on the way in: the duplicate-name check
+   puts the choice in front of you instead, and one answer can cover every repeated name
+   in the file at once — see *Fields that share a name* below.
 
    Drawing is the exception, because there the intent is not in doubt. **Draw field**
    arms the draw tool; the moment you close the outline it becomes a field, selected
@@ -139,8 +139,9 @@ call anything.
    **Auto-fix** or **Mark reviewed** applies to the whole batch. A bulk fix is a single
    history entry, so one Ctrl+Z puts all of it back. Overlaps go through in a batch too,
    settled by the rule that needs nobody — the larger field gives up the shared ground —
-   and the run says how many it trimmed. Two copies of one boundary are the one thing a
-   batch will not touch, because that ends in a field being deleted. Some things are not worth fixing, so the same ticks also carry
+   and the run says how many it trimmed. Two things a batch will not touch, because each is
+   a decision rather than a correction: two copies of one boundary, which ends in a field
+   being deleted, and fields that share a name, which are either one field or several. Some things are not worth fixing, so the same ticks also carry
    **Delete N fields**: the fields those issues are about, gone with their polygons, on
    the same confirmation and the same single undo as the field list's own bulk delete. A warning you have looked at and are happy with can be
    marked reviewed: it drops out of the working list into a collapsed "reviewed" section,
@@ -205,7 +206,7 @@ row. Features that belong to no field are not exported, and the quality panel sa
 | Self-intersecting or invalid geometry | yes | split each bow-tie, then unite the parts |
 | Two fields overlapping | yes | three routes: trim the larger, trim one you pick, or shrink both apart |
 | The same boundary twice | yes | you pick which to keep; the other field and its polygons go |
-| Duplicate `Client`/`Farm`/`Field` | yes | number the surplus apart, or combine them if they are one field |
+| Duplicate `Client`/`Farm`/`Field` | yes | you say whether they are one field (merge) or several (number apart) — for one name or every name at once |
 | A name longer than 60 characters | yes | trim at a word boundary, then keep the results distinct |
 | Accented or non-Latin characters | yes | rewrite in plain ASCII, then keep the results distinct |
 | Jagged, over-dense boundaries | no | simplify at a suggested tolerance, with preview |
@@ -316,6 +317,28 @@ CropForce identifies a field by its Client/Farm/Field combination, so uploading 
 combination twice replaces the first with the second and a boundary disappears without
 warning. Case and extra spacing are treated as the same name, because they collide in
 practice even where they do not today.
+
+### Fields that share a name
+
+Two rows called *Block 1* are one of two things, and the tool cannot tell which: one field
+farmed in separate pieces, or two fields that happen to share a name. Guess wrong and it
+either welds neighbours together or splits a field in two, so the auto-fix asks.
+
+- **One field — merge them.** Every polygon moves into the first row and the others go;
+  the export writes one row with one MultiPolygon.
+- **Different fields — number them apart.** The first keeps the name and the others
+  become *Block 1 (2)*, *Block 1 (3)* — the dialog shows the real name it will use.
+
+An estate exported with a row per planting block arrives with dozens of these at once, so
+the dialog offers **Do the same for every name that repeats**, ticked by default when
+there is more than one. One decision then settles the whole file, and each name is still
+only ever merged with itself — every *Block 1* with the other *Block 1*s, every *Block 2*
+with the *Block 2*s — using exactly the same comparison as the check, so a name differing
+only in case or spacing counts as the same and *Block 1* is never confused with *Block 10*
+or with a *Block 1* on another farm. The whole of it is one history entry.
+
+The bulk **Auto-fix** in the quality panel leaves these alone and says so, for the same
+reason it leaves duplicate boundaries alone: it is a decision, not a correction.
 
 Each check carries a tooltip explaining the boundary criterion behind it — single
 continuous management zone, crop area only, exclusion zones, smoothing, multi-polygon

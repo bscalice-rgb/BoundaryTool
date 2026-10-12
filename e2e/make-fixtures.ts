@@ -186,7 +186,23 @@ export async function writeFixtures(): Promise<void> {
     }),
   );
 
-  // 7. A plain WGS84 GeoJSON.
+  // 7. One polygon per row, several rows per block name — an estate exported with a
+  //     row per planting block. Block 1 is in three pieces, Block 2 in two.
+  writeFileSync(
+    join(FIXTURE_DIR, 'repeated-names.geojson'),
+    JSON.stringify({
+      type: 'FeatureCollection',
+      features: ['Block 1', 'Block 2', 'Block 1', 'Block 3', 'Block 2', 'Block 1'].map(
+        (name, i) => ({
+          type: 'Feature',
+          properties: { Client: 'Sawit Jaya', Farm: 'Estate 3', Field: name },
+          geometry: { type: 'Polygon', coordinates: [ring(101.2 + i * 0.006, 1.1, 0.004)] },
+        }),
+      ),
+    }),
+  );
+
+  // 8. A plain WGS84 GeoJSON.
   writeFileSync(
     join(FIXTURE_DIR, 'extra.geojson'),
     JSON.stringify({

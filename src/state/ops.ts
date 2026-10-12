@@ -174,6 +174,27 @@ export function deleteFields(
   };
 }
 
+/**
+ * Folds each group of fields into its first member: every polygon moves across to it
+ * and the emptied rows go. Any number of groups in one call, so merging forty names'
+ * worth of fields is one step in the history rather than forty.
+ */
+export function mergeFieldGroups(workspace: Workspace, groups: FieldId[][]): Workspace {
+  const into = new Map<FieldId, FieldId>();
+  for (const [keeper, ...rest] of groups) {
+    for (const id of rest) if (id !== keeper) into.set(id, keeper);
+  }
+  if (into.size === 0) return workspace;
+  return {
+    fields: workspace.fields.filter((field) => !into.has(field.id)),
+    features: workspace.features.map((feature) =>
+      feature.fieldId !== null && into.has(feature.fieldId)
+        ? { ...feature, fieldId: into.get(feature.fieldId)! }
+        : feature,
+    ),
+  };
+}
+
 /** Replaces one feature with several. Used by the split tool. */
 export function replaceWithParts(
   workspace: Workspace,

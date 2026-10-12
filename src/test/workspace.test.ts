@@ -28,6 +28,7 @@ import {
   suggestFileName,
 } from '../lib/export';
 import {
+  autoMergeNames,
   autoShortenNames,
   autoUniquifyNames,
   fieldGeometries,
@@ -282,6 +283,98 @@ describe('duplicate Client/Farm/Field combinations', () => {
     expect(runChecks(combined).map((f) => f.kind)).not.toContain('duplicate-name');
     expect(planExport(combined).rows).toHaveLength(1);
     expect(planExport(combined).rows[0].geometry.coordinates).toHaveLength(2);
+  });
+});
+
+describe('merging fields that share a name', () => {
+  /**
+   * One polygon per row, the way an import with a name column arrives: each row named
+   * after the block it belongs to, with several rows per block.
+   */
+  function blocksByName(names: string[], farm = 'Home'): Workspace {
+    let workspace: Workspace = {
+      fields: [],
+      features: names.map((_, i) => newFeature(square(2.5 + i * 0.004, 48.8), 'blocks.zip')),
+    };
+    for (const feature of [...workspace.features]) {
+      workspace = combineIntoField(workspace, [feature.id]);
+    }
+    workspace.fields.forEach((field, i) => {
+      workspace = updateField(workspace, field.id, { client: 'Acme', farm, field: names[i] });
+    });
+    return workspace;
+  }
+
+  const duplicateIds = (workspace: Workspace) =>
+    runChecks(workspace)
+      .filter((flag) => flag.kind === 'duplicate-name')
+      .flatMap((flag) => flag.fieldIds);
+
+  it('merges every repeated name into one field per name', () => {
+    const workspace = blocksByName(['1', '2', '1', '3', '2', '1']);
+    expect(runChecks(workspace).filter((f) => f.kind === 'duplicate-name')).toHaveLength(2);
+
+    const outcome = autoMergeNames(workspace, duplicateIds(workspace));
+    expect(outcome.ok).toBe(true);
+
+    const fields = outcome.workspace.fields;
+    expect(fields.map((f) => f.field)).toEqual(['1', '2', '3']);
+    const members = (name: string) =>
+      outcome.workspace.features.filter(
+        (feature) => feature.fieldId === fields.find((f) => f.field === name)!.id,
+      ).length;
+    // Every 1 with the 1s, every 2 with the 2s, and the lone 3 untouched.
+    expect([members('1'), members('2'), members('3')]).toEqual([3, 2, 1]);
+    expect(runChecks(outcome.workspace).map((f) => f.kind)).not.toContain('duplicate-name');
+  });
+
+  it('exports one row per name, each carrying all of its blocks', () => {
+    const workspace = blocksByName(['1', '2', '1', '2', '1']);
+    const merged = autoMergeNames(workspace, duplicateIds(workspace)).workspace;
+    const rows = planExport(merged).rows;
+
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.geometry.coordinates.length).sort()).toEqual([2, 3]);
+  });
+
+  it('never merges across names', () => {
+    // Same field name on two different farms is two different fields in CropForce,
+    // and "Block 1" is not "Block 10".
+    let workspace = blocksByName(['Block 1', 'Block 1', 'Block 10']);
+    const other = blocksByName(['Block 1'], 'North');
+    workspace = { fields: [...workspace.fields, ...other.fields], features: [...workspace.features, ...other.features] };
+
+    const merged = autoMergeNames(workspace, workspace.fields.map((f) => f.id)).workspace;
+    expect(merged.fields).toHaveLength(3);
+    expect(merged.fields.map((f) => `${f.farm}/${f.field}`).sort()).toEqual([
+      'Home/Block 1',
+      'Home/Block 10',
+      'North/Block 1',
+    ]);
+  });
+
+  it('treats case and spacing the way the duplicate check does', () => {
+    const workspace = blocksByName(['Long Acre', 'long  acre', 'LONG ACRE']);
+    const merged = autoMergeNames(workspace, duplicateIds(workspace)).workspace;
+    expect(merged.fields).toHaveLength(1);
+    // The row that survives is the first, spelt the way it was written.
+    expect(merged.fields[0].field).toBe('Long Acre');
+  });
+
+  it('only touches the names it was given', () => {
+    const workspace = blocksByName(['1', '1', '2', '2']);
+    const firstName = runChecks(workspace).find((f) => f.kind === 'duplicate-name')!;
+    const merged = autoMergeNames(workspace, firstName.fieldIds).workspace;
+    // One name settled, the other still waiting on its own decision.
+    expect(merged.fields).toHaveLength(3);
+    expect(runChecks(merged).filter((f) => f.kind === 'duplicate-name')).toHaveLength(1);
+  });
+
+  it('is one step, and leaves the input alone', () => {
+    const workspace = blocksByName(['1', '2', '1', '2']);
+    const before = structuredClone(workspace);
+    autoMergeNames(workspace, duplicateIds(workspace));
+    expect(workspace).toEqual(before);
   });
 });
 

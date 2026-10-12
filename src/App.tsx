@@ -47,6 +47,7 @@ import {
   autoFixGeometry,
   autoShortenNames,
   autoSimplify,
+  autoMergeNames,
   autoUniquifyNames,
   largerOf,
   resolveOverlap,
@@ -77,6 +78,8 @@ import {
   CoordinatesDialog,
   ExportDialog,
   ImportDialog,
+  NameCollisionDialog,
+  type NameRoute,
   OverlapDialog,
 } from './components/dialogs';
 import { InfoDot, ToastStack, type Toast } from './components/ui';
@@ -112,6 +115,8 @@ export default function App() {
     /** A near-identical pair is resolved by deleting one, not by clipping. */
     duplicate: boolean;
   } | null>(null);
+  /** The name-collision flag whose dialog is open: which fields, and every other name. */
+  const [nameCollision, setNameCollision] = useState<QAFlag | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   /** Export blockers as of the moment the dialog was opened; null while it is closed. */
   const [exportStatus, setExportStatus] = useState<ExportBlockers | null>(null);
@@ -563,7 +568,9 @@ export default function App() {
         case 'delete-features':
           return autoDeleteFeatures(current, flag.featureIds, t);
         case 'uniquify-names':
-          return autoUniquifyNames(current, flag.fieldIds, t);
+          // Numbering apart says "these are different fields", which is a decision
+          // about what a field is; an unattended run does not get to make it.
+          return null;
         case 'shorten-names':
           return autoShortenNames(current, flag.fieldIds, t);
         case 'asciify-names':
@@ -582,6 +589,13 @@ export default function App() {
       setActiveFlagId(flag.id);
       const spec = flag.autoFix;
       if (!spec) return;
+
+      // Fields sharing a name are either one field or several, and only the user knows
+      // which, so the fix asks rather than numbering them apart unbidden.
+      if (flag.kind === 'duplicate-name') {
+        setNameCollision(flag);
+        return;
+      }
 
       if (spec.kind === 'resolve-overlap') {
         const pair = flag.fieldIds
@@ -621,7 +635,9 @@ export default function App() {
         // features they touch settle in order instead of fighting each other.
         const outcome = applyAutoFix(next, flag);
         if (!outcome) {
-          if (flag.autoFix?.kind === 'resolve-overlap') undecided += 1;
+          if (flag.autoFix?.kind === 'resolve-overlap' || flag.kind === 'duplicate-name') {
+            undecided += 1;
+          }
           continue;
         }
         if (!outcome.ok) continue;
@@ -703,6 +719,48 @@ export default function App() {
       }
     },
     [workspace.fields, zoomTo],
+  );
+
+  /** Every other name that repeats, for the dialog's "do the same for all". */
+  const otherNameGroups = useMemo(() => {
+    if (!nameCollision) return [];
+    const byId = new Map(workspace.fields.map((field) => [field.id, field]));
+    return flags
+      .filter((flag) => flag.kind === 'duplicate-name' && flag.id !== nameCollision.id)
+      .map((flag) =>
+        flag.fieldIds.map((id) => byId.get(id)).filter((f): f is WField => f !== undefined),
+      )
+      .filter((group) => group.length > 1);
+  }, [nameCollision, flags, workspace.fields]);
+
+  /**
+   * Merges or numbers apart the fields of one repeated name, or of every repeated name
+   * at once. Either way it is one history entry, so one Ctrl+Z puts it all back.
+   */
+  const handleResolveNames = useCallback(
+    (route: NameRoute, everyName: boolean) => {
+      const flag = nameCollision;
+      setNameCollision(null);
+      if (!flag) return;
+      const fieldIds = everyName
+        ? flags.filter((f) => f.kind === 'duplicate-name').flatMap((f) => f.fieldIds)
+        : flag.fieldIds;
+      const outcome =
+        route === 'merge'
+          ? autoMergeNames(workspace, fieldIds, t)
+          : autoUniquifyNames(workspace, fieldIds, t);
+      if (!outcome.ok) {
+        toast(outcome.message, 'error');
+        return;
+      }
+      setActiveFlagId(null);
+      apply(
+        route === 'merge' ? t('action.mergeNames') : t('action.autoFix', { title: flag.title }),
+        () => outcome.workspace,
+      );
+      toast(t('toast.undoHint', { message: outcome.message }));
+    },
+    [nameCollision, flags, workspace, apply, toast, t],
   );
 
   /**
@@ -1303,6 +1361,18 @@ export default function App() {
           loadedSources={loadedSources}
           onConfirm={confirmImport}
           onCancel={() => setPendingImport(null)}
+        />
+      )}
+
+      {nameCollision && (
+        <NameCollisionDialog
+          fields={nameCollision.fieldIds
+            .map((id) => workspace.fields.find((field) => field.id === id))
+            .filter((field): field is WField => field !== undefined)}
+          otherGroups={otherNameGroups}
+          workspace={workspace}
+          onResolve={handleResolveNames}
+          onCancel={() => setNameCollision(null)}
         />
       )}
 

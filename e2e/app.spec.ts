@@ -1044,7 +1044,11 @@ test.describe('duplicate Client/Farm/Field', () => {
     await expect(exportDialog.getByText(/blocked until these are resolved/)).toBeVisible();
     await exportDialog.getByRole('button', { name: 'Close', exact: true }).click();
 
+    // Numbering apart and merging are both honest answers, so the fix asks which.
     await flag.getByRole('button', { name: 'Auto-fix' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Fields that share a name' });
+    await dialog.getByRole('radio', { name: /Different fields/ }).check();
+    await dialog.getByRole('button', { name: 'Number apart' }).click();
 
     const names = await page
       .locator('input[aria-label="Field"]')
@@ -1066,6 +1070,80 @@ test.describe('duplicate Client/Farm/Field', () => {
 
     await expect(page.locator('article', { hasText: 'share the name' })).toBeHidden();
     await expect(page.locator('input[aria-label="Field"]')).toHaveCount(1);
+  });
+});
+
+test.describe('merging blocks that share a name', () => {
+  /** Six rows, three names: Block 1 three times, Block 2 twice, Block 3 once. */
+  async function importRepeatedNames(page: Page) {
+    await page.setInputFiles('input[type=file]', join(FIXTURE_DIR, 'repeated-names.geojson'));
+    await page.getByRole('button', { name: 'Add to workspace' }).click();
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(6);
+  }
+
+  const fieldNames = (page: Page) =>
+    page
+      .locator('input[aria-label="Field"]')
+      .evaluateAll((inputs) => (inputs as HTMLInputElement[]).map((input) => input.value).sort());
+
+  test('merges every repeated name in one decision, each only with itself', async ({ page }) => {
+    await page.goto('/');
+    await importRepeatedNames(page);
+    await expect(page.locator('article', { hasText: 'share the name' })).toHaveCount(2);
+
+    await page
+      .locator('article', { hasText: 'share the name' })
+      .first()
+      .getByRole('button', { name: 'Auto-fix' })
+      .click();
+    const dialog = page.getByRole('dialog', { name: 'Fields that share a name' });
+    await expect(dialog.getByRole('radio', { name: /One field/ })).toBeChecked();
+    // One answer for the whole estate rather than one per name.
+    const everyName = dialog.getByRole('checkbox', { name: /every name that repeats/ });
+    await expect(everyName).toBeChecked();
+    await expect(dialog).toContainText('2 names, 5 fields');
+    await dialog.getByRole('button', { name: 'Merge', exact: true }).click();
+
+    expect(await fieldNames(page)).toEqual(['Block 1', 'Block 2', 'Block 3']);
+    await expect(page.locator('article', { hasText: 'share the name' })).toHaveCount(0);
+    await expect(page.getByText('Merged 5 fields into 2, one per name.')).toBeVisible();
+
+    // One history entry: one undo puts all six rows back.
+    await page.keyboard.press('Control+z');
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(6);
+  });
+
+  test('can settle just the one name it was opened on', async ({ page }) => {
+    await page.goto('/');
+    await importRepeatedNames(page);
+
+    await page
+      .locator('article', { hasText: 'share the name' })
+      .first()
+      .getByRole('button', { name: 'Auto-fix' })
+      .click();
+    const dialog = page.getByRole('dialog', { name: 'Fields that share a name' });
+    await dialog.getByRole('checkbox', { name: /every name that repeats/ }).uncheck();
+    await dialog.getByRole('button', { name: 'Merge', exact: true }).click();
+
+    // One name merged, the other still waiting on its own answer.
+    await expect(page.locator('article', { hasText: 'share the name' })).toHaveCount(1);
+  });
+
+  test('is left out of a bulk auto-fix, because it is a decision', async ({ page }) => {
+    await page.goto('/');
+    await importRepeatedNames(page);
+
+    for (const box of await page
+      .locator('article', { hasText: 'share the name' })
+      .getByRole('checkbox', { name: 'Select this issue for a bulk action' })
+      .all()) {
+      await box.check();
+    }
+    await page.getByRole('button', { name: 'Auto-fix 2' }).click();
+
+    await expect(page.getByText(/decisions only you can make/)).toBeVisible();
+    await expect(page.locator('input[aria-label="Field"]')).toHaveCount(6);
   });
 });
 
