@@ -11,6 +11,7 @@ import simplify from '@turf/simplify';
 import truncate from '@turf/truncate';
 import union from '@turf/union';
 import unkinkPolygon from '@turf/unkink-polygon';
+import * as polyclip from 'polyclip-ts';
 import { featureCollection, lineString, multiPolygon, polygon } from '@turf/helpers';
 import type { BBox, Feature, LineString, MultiPolygon, Polygon, Position } from 'geojson';
 import type { PolyFeature, PolyGeom } from '../types';
@@ -338,21 +339,29 @@ function computeValidity(geometry: PolyGeom): ValidityReport {
 /**
  * Repairs a self-intersecting outline.
  *
- * The workhorse is a zero-width buffer, which is the canonical way to make a polygon
- * valid: JTS rebuilds the shape from its edges, so self-crossing and overlapping rings
- * come back as a proper outer-and-holes structure with the area unchanged. On a
- * plantation block carrying four hundred exclusion zones that is the only thing that
- * works — un-kinking each part instead either gives up or fills every hole in.
+ * The first answer is a non-zero fill: every outer ring covers whatever it loops
+ * around, whichever way each lobe of a bow-tie happens to wind, every exclusion zone
+ * is carved out of that the same way, and overlapping parts merge. That is what
+ * whoever drew the outline meant, and it comes back as a proper outer-and-holes
+ * structure in one step — on estates whose blocks carry hundreds of bow-ties it is
+ * the only thing that clears all of them.
  *
- * Around it sit three corrections, each for something the buffer alone gets wrong: an
- * exclusion zone it hands back still crossing, parts of one outline that overlap each
- * other, and a ring drawn as a figure of eight, where it keeps the lobe wound the right
- * way and drops the other.
+ * When that fails, the fallback is a zero-width buffer: JTS rebuilds the shape from
+ * its edges, so self-crossing and overlapping rings come back as a proper
+ * outer-and-holes structure. Around it sit three corrections, each for something the
+ * buffer alone gets wrong: an exclusion zone it hands back still crossing, parts of
+ * one outline that overlap each other, and a ring drawn as a figure of eight, where it
+ * keeps the lobe wound the right way and drops the other.
  */
 export function repairGeometry(geometry: PolyGeom): PolyGeom | null {
   if (!hasAnyRing(geometry)) return null;
   const cleaned = normalize(geometry);
   if (cleaned && checkValidity(cleaned).ok) return cleaned;
+
+  // Like the buffer below, the fill is given the outline exactly as it stands.
+  const filled = nonZeroFill(geometry);
+  const filledClean = filled && normalize(filled);
+  if (filledClean && checkValidity(filledClean).ok) return filledClean;
 
   // The buffer is given the outline exactly as it stands, not a tidied copy. Tidying
   // strips vertices that sit in a straight line, and where two rings share those
@@ -411,6 +420,25 @@ export function repairGeometry(geometry: PolyGeom): PolyGeom | null {
  * trading for the last two crossings; on an outline with no holes it costs nothing.
  */
 const FALLBACK_HOLE_FLOOR = 0.5;
+
+/**
+ * The outline as its rings enclose it under the non-zero rule, with every node worked
+ * out exactly.
+ *
+ * The buffer below gets two things wrong that this does not. It keeps only the lobe of
+ * a bow-tie wound the right way, so an estate of many bow-tied blocks quietly loses
+ * ground — 26 ha of 570 on one real file. And on estates of a few thousand vertices
+ * and hundreds of bow-ties it hands back outlines that still cross, which no number of
+ * clicks would clear.
+ */
+function nonZeroFill(geometry: PolyGeom): PolyGeom | null {
+  try {
+    const out = polyclip.union(geometry.coordinates as polyclip.Geom);
+    return out.length > 0 ? simplifyGeomType({ type: 'MultiPolygon', coordinates: out }) : null;
+  } catch {
+    return null;
+  }
+}
 
 /** JTS's own polygon repair: rebuild the shape from its edges, changing nothing else. */
 function zeroWidthBuffer(geometry: PolyGeom): PolyGeom | null {

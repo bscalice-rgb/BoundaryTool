@@ -255,6 +255,26 @@ describe('invalid geometry', () => {
     expect(areaHa(again)).toBeCloseTo(areaHa(fixed), 6);
   });
 
+  it('keeps both lobes of a bow-tied block that carries exclusion zones', () => {
+    // A block outline drawn as a figure of eight, with roads in both halves. The two
+    // lobes wind opposite ways, and the buffer keeps only one of them — on a real
+    // estate of hundreds of bow-ties that cost 26 ha and still left crossings behind.
+    const s = 0.004;
+    const outer: Position[] = [[2.5, 48.8], [2.5 + s, 48.8 + s], [2.5 + s, 48.8], [2.5, 48.8 + s], [2.5, 48.8]];
+    const road = (x: number, y: number) => squareRing(x, y, 0.0003).slice().reverse();
+    const block = poly([outer, road(2.5004, 48.8016), road(2.5033, 48.8016)]);
+    expect(selfIntersections(block)).toBeGreaterThan(0);
+
+    const fixed = repairGeometry(block)!;
+    expect(checkValidity(fixed).ok).toBe(true);
+    expect(partsOf(fixed)).toBe(2);
+    expect(ringCount(fixed).holes).toBe(2);
+    // Two triangles, each a quarter of the square, less the roads.
+    const square = areaHa(poly([squareRing(2.5, 48.8, s)]));
+    const roads = areaHa(poly([squareRing(2.5, 48.8, 0.0003)])) * 2;
+    expect(areaHa(fixed)).toBeCloseTo(square / 2 - roads, 2);
+  });
+
   it('calls out two blocks of one field overlapping each other', () => {
     const coordinates = [block(2.5, 48.8, 0.004), block(2.502, 48.8, 0.004)].map(
       (p) => (p as { coordinates: Position[][] }).coordinates,
